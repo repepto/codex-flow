@@ -10,6 +10,98 @@ Codex must not infer, correct, or reinterpret commands.
 
 If a syntactically valid command cannot be executed in the current state, Codex must return a clear informational response and do nothing unsafe.
 
+Before waiting for user input after a stop, failure, ambiguity, blocked command, or required command state, Codex must explicitly state what it is waiting for.
+
+## strict
+
+Formats:
+
+```text
+strict:true
+strict:false
+```
+
+Behavior:
+
+- valid only as a standalone command received while Codex is waiting for user input;
+- may be run whether or not an active step exists;
+- may be run during a paused step chain;
+- may be run when sync state requires `resync`;
+- does not require the sync gate;
+- updates only the `Strict Mode` field in `.codex/state.md` when the file exists;
+- preserves all other `.codex/state.md` fields;
+- does not create a step;
+- does not modify project code;
+- does not run checks;
+- does not create commits.
+
+`strict:true` and `strict:false` are allowed runtime-mode switches. They are not unsafe merely because they update `.codex/state.md`, but they must preserve every other state field and must not be combined with any other requested action.
+
+If `.codex/state.md` is missing, create the default state skeleton with the requested `Strict Mode` value, `Last Known Revision: none`, `Last Known Branch: none`, `Last Sync Source: none`, and `Step Chain Mode: none`.
+
+Creating this skeleton does not initialize sync. The sync baseline remains uninitialized until a later successful `resync`.
+
+`strict:true` enables Strict Mode.
+
+`strict:false` disables Strict Mode and returns Codex to its default reasoning behavior.
+
+In Strict Mode, Codex may make factual or technical conclusions only from project code, project files, dependency code, command output, and user-provided context that are available in the current session. If the available context is insufficient to support a conclusion, Codex must stop that line of reasoning, say what context is missing, and wait for the user to provide it or allow a way to inspect it.
+
+## Stability Safety Gate
+
+Before creating or updating workflow state, creating a new active step, continuing an active step, executing a state-changing command, executing a queued `run-steps` item, or running `apply`, Codex must check whether the requested work could damage or weaken the workflow system.
+
+Codex must run this gate for:
+
+- a non-command prompt that would create a new active step;
+- any prompt that would continue an active step;
+- `record` and any other command that creates or updates `.codex/current-step.md` or `.codex/state.md`;
+- each executable item read from `.codex/steps.md` before checkpoint creation or execution;
+- `apply`.
+
+Stability-sensitive surfaces include:
+
+- `AGENTS.md`;
+- `.codex/` rule, config, memory, report, checkpoint, and runtime files;
+- `.gitignore` entries required for `.codex/state.md`, `.codex/checkpoints/`, and `.codex/tmp/`;
+- git sync state, history, reports, step ids, active step state, and run-step checkpoints;
+- command definitions, sync gates, after-step rules, commit rules, report rules, override rules, and mandatory safety rules.
+
+A prompt is unsafe when it asks Codex to delete, overwrite, bypass, disable, weaken, or silently corrupt a stability-sensitive surface, or when the requested change would likely remove required workflow protections.
+
+Examples of unsafe prompts:
+
+- delete `.codex/`;
+- delete or rewrite `AGENTS.md` without preserving the workflow entry point;
+- replace `.gitignore` with content that drops required `.codex` runtime ignores;
+- remove sync gates, `resync`, after-step integrity checks, required commit failure recovery, transient-state exclusions, or destructive git restrictions;
+- allow full-file override replacement or weaken mandatory system actions.
+
+If a prompt is unsafe, Codex must not:
+
+- create or update an active step;
+- store or update decisions, open questions, working notes, step-chain state, or other workflow state;
+- modify project files;
+- run checks;
+- create commits;
+- partially execute the safe-looking parts of the prompt.
+
+Instead, Codex must respond with:
+
+- a brief explanation that the prompt is unsafe for workflow stability;
+- the specific risky part or file when identifiable;
+- a safer replacement prompt when the user's likely intent can be preserved safely.
+
+If no safe replacement prompt exists, Codex must say that the request cannot be safely reformulated for this workflow.
+
+Safe reformulation should preserve required stability content. For example, a request to replace `.gitignore` while adding unrelated ignores should be reformulated as a request to append or merge those ignores while preserving:
+
+```gitignore
+.codex/state.md
+.codex/checkpoints/
+.codex/tmp/
+```
+
 ## Normal Prompt Behavior
 
 Before creating a new active step, Codex must pass the sync gate:
@@ -19,7 +111,11 @@ Before creating a new active step, Codex must pass the sync gate:
 - the current git revision and branch must match `.codex/state.md`;
 - pre-existing project changes must not be present.
 
-If the sync gate fails, Codex must not create a new active step and must require `resync` or manual resolution.
+If the sync gate fails, Codex must not create a new active step.
+
+If pre-existing project changes are present before a normal step starts, Codex must stop and require manual cleanup or `resync` after the tree is clean. Pre-existing changes are not converted into a special step.
+
+For any other sync-gate failure, Codex must require `resync` or manual resolution.
 
 If no active step exists, the sync gate passes, and the user sends a non-command prompt, Codex must create a new active step in `.codex/current-step.md`. The prompt becomes the task.
 
@@ -27,7 +123,7 @@ If an active step exists and the user sends a non-command prompt, Codex must tre
 
 A new step cannot be created while another step is active.
 
-Before `apply`, Codex must not modify project files. Updating `.codex/current-step.md` to create or maintain the active step is allowed workflow-state maintenance, not project execution.
+During a normal active step, before `apply`, Codex must not modify project files. Updating `.codex/current-step.md` to create or maintain the active step is allowed workflow-state maintenance, not project execution.
 
 When a normal step starts, `.codex/current-step.md` must record the current git revision and branch as the step base. If that revision or branch changes outside the Codex flow while the step is active, Codex must stop and require `resync` before applying the step.
 
@@ -91,6 +187,7 @@ Behavior:
 
 - requires an active step;
 - stores or updates a decision in `.codex/current-step.md`;
+- must pass the Stability Safety Gate before storing or updating the decision;
 - acts as upsert: the same id replaces the previous value;
 - does not modify project code;
 - does not run checks;
@@ -114,6 +211,7 @@ Behavior:
 
 - requires an active step;
 - removes one decision from the current step;
+- must pass the Stability Safety Gate before removing the decision;
 - does not cancel the step.
 
 If no active step exists, return:
@@ -136,6 +234,7 @@ Behavior:
 
 - requires an active step;
 - removes all recorded decisions from the current step;
+- must pass the Stability Safety Gate before removing decisions;
 - does not cancel the step;
 - preserves task, open questions, and working notes.
 
@@ -161,8 +260,11 @@ Behavior:
 - if checks fail, stops and keeps the same step active;
 - if checks pass, runs the after-step process;
 - updates Codex memory and reports;
-- uses git sync when the sync rules allow it;
-- completes the step.
+- for a normal step, uses required git sync and completes the step only after the required git commit succeeds;
+- for an intermediate step inside an active `run-steps` chain, records the required deferred sync state and completes the chain step only after completed-step metadata is written;
+- for final `run-steps` chain finalization, completes the chain only after the required final git commit succeeds.
+
+If the required git commit or required deferred chain sync state cannot be created, `apply` must stop and the step or chain must not complete.
 
 If no active step exists, return:
 
@@ -170,13 +272,7 @@ If no active step exists, return:
 No active step.
 ```
 
-If pre-existing project changes are detected before starting a new normal step, Codex must not mix them with a new task. It must create or keep a special step:
-
-```text
-Resolve pre-existing changes
-```
-
-and require the user to resolve that step through normal step flow.
+If pre-existing project changes are detected before starting a new normal step, Codex must stop and require manual cleanup or `resync` after the tree is clean. Codex must not create a special step for pre-existing changes.
 
 ## status
 
@@ -196,6 +292,7 @@ Behavior:
 
 If an active step exists, show:
 
+- Strict Mode;
 - Step ID;
 - Task;
 - Decisions;
@@ -205,10 +302,125 @@ If an active step exists, show:
 
 If no active step exists, show:
 
+- Strict Mode;
 - no active step;
 - last completed step if known from history;
 - recommended next step from `.codex/next-step.md`;
 - relevant state warnings.
+
+## compare
+
+Formats:
+
+```text
+compare
+compare:<branch-name>
+```
+
+If `<branch-name>` is omitted, the target branch is `main`.
+
+`<branch-name>` must:
+
+- not be empty;
+- contain no whitespace;
+- contain no shell metacharacters;
+- resolve to a local branch or locally known remote-tracking branch.
+
+Behavior:
+
+- read-only;
+- compares the current checked-out branch with the target branch;
+- uses only local git state;
+- does not fetch remote refs;
+- does not modify files;
+- does not run checks;
+- does not create a step.
+
+The comparison output must include:
+
+- current branch;
+- target branch;
+- merge base, when available;
+- commits only on the current branch;
+- commits only on the target branch;
+- changed files summary for the current branch relative to the target branch;
+- MR risk assessment for merging the current branch into the target branch;
+- relevant state warnings, including dirty working tree, detached HEAD, missing target branch, or missing merge base.
+
+The MR risk assessment must include:
+
+- main compatibility risks, especially backward compatibility risks;
+- affected contracts, APIs, data formats, schemas, migrations, configuration, dependencies, security, privacy, performance, and user-facing behavior when relevant;
+- test and verification gaps;
+- likely merge or rollout risks;
+- overall MR safety rating;
+- recommended actions before merge.
+
+The assessment must be based on the local branch comparison. If MR platform metadata is unavailable, Codex must state that only the local diff was reviewed.
+
+If the target branch cannot be resolved, return an informational message and make no unsafe change.
+
+## check
+
+Formats:
+
+```text
+check
+check:deep
+```
+
+Behavior shared by both formats:
+
+- read-only;
+- uses only local project files, local dependency files when inspected, and local git state;
+- does not fetch remote refs;
+- does not modify files;
+- does not run project verification commands;
+- does not create a step;
+- does not require an active step;
+- does not require the sync gate;
+- does not require a clean working tree;
+- does not require `resync`.
+
+`check` is a current-diff risk review.
+
+`check` must analyze only the current local changes relative to `HEAD`, including staged changes, unstaged changes, and untracked files when their contents are available.
+
+`check` must not report unrelated pre-existing project problems as findings. A finding belongs in `check` only when it is introduced by, exposed by, or directly affected by the current diff. If Codex cannot determine whether a problem predates the diff, it must label that uncertainty instead of presenting the issue as a diff finding.
+
+The `check` output must include:
+
+- review scope and baseline commit;
+- current branch;
+- staged, unstaged, and untracked file summary;
+- relevant state warnings such as dirty working tree, active step, detached HEAD, or missing `HEAD`;
+- diff summary;
+- backward compatibility risks;
+- affected contracts, APIs, data formats, schemas, migrations, configuration, dependencies, security, privacy, performance, and user-facing behavior when relevant;
+- likely bugs or behavioral regressions introduced by the diff;
+- test and verification gaps for the diff;
+- overall diff risk rating;
+- recommended actions before committing or resyncing.
+
+The `check` report must state that the assessment is limited to the current local diff and excludes unrelated baseline issues.
+
+`check:deep` is a whole-project risk review.
+
+`check:deep` must analyze the project as it currently exists in the working tree, including dirty local changes when present, and must clearly state whether the reviewed tree is clean or dirty.
+
+The `check:deep` output must include:
+
+- review scope and current git state;
+- project-wide architecture, maintainability, and workflow risks;
+- backward compatibility and migration risks;
+- configuration, dependency, build, test, security, privacy, performance, and operational risks when relevant;
+- `.codex` workflow consistency risks when the project uses this workflow;
+- important missing tests or verification gaps;
+- prioritized findings;
+- overall project risk rating;
+- recommendations.
+
+`check:deep` may report baseline project problems even when they are unrelated to the current diff, but it must distinguish project-wide findings from issues introduced by dirty local changes when that distinction is visible.
 
 ## details
 
@@ -274,7 +486,7 @@ Behavior:
 - read-only;
 - shows the last `n` completed steps from `.codex/history.md`;
 - output order must be chronological, with the latest step last;
-- each row should include step id and title.
+- each row must include step id and title.
 
 Example output:
 
@@ -292,22 +504,43 @@ Format:
 run-steps
 ```
 
+Executable step grammar:
+
+- `.codex/steps.md` may contain introductory prose before the first executable item;
+- the literal `No pending steps.` is informational and does not suppress valid executable items;
+- each executable item starts with a second-level Markdown heading: `## <title>`;
+- `<title>` must not be empty;
+- each executable item must contain exactly one `Task:` label before the next item;
+- task text is all non-separator content after `Task:` until the next `---` separator or next `## <title>` item;
+- task text must not be empty after trimming whitespace;
+- `---` separates items and may be omitted after the final item;
+- after the first executable item, content that is not part of an item or separator is invalid.
+
+If `.codex/steps.md` contains malformed executable items, ambiguous separators, duplicate `Task:` labels in one item, or non-empty item content outside this grammar, Codex must stop before checkpoint creation and report the syntax issue.
+
 Behavior:
 
 - requires no active step;
 - reads executable pending steps only from `.codex/steps.md`;
 - never reads or executes `.codex/run-step-examples.md`;
+- must run the Stability Safety Gate for every executable pending step before creating the checkpoint or executing any step;
+- before checkpoint creation, must pass the same sync gate used for creating a normal active step;
+- must not start if staged or unstaged pre-existing changes are present;
 - executes `.codex/steps.md` as an automatic atomic step chain;
 - requires an initialized git sync backend;
 - creates an internal checkpoint sufficient to restore project files and `.codex` state;
 - the checkpoint must include transient `.codex` state that is not committed, including `.codex/state.md`, `.codex/current-step.md`, and any active chain metadata;
 - active chain metadata must be stored in `.codex/state.md`;
+- creates one git commit for the whole chain, after all chain steps complete successfully;
+- must not create per-step git commits during an active chain;
+- accumulated project and `.codex` metadata changes created by earlier chain steps are chain-owned changes and do not count as pre-existing changes for later steps in the same chain;
 - does not mutate `.codex/steps.md`;
+- does not remove or mark completed entries in `.codex/steps.md`;
 - executes steps in the order written by the user;
-- each chain step is applied through the normal `apply` process;
+- each chain step uses the normal `apply` process for implementation, checks, completed-step metadata, and failure handling, except git commit creation is deferred until chain finalization;
 - if a step fails checks, the chain pauses inside that active step;
-- after the user fixes the active step and `apply` succeeds, the chain continues automatically;
-- if the chain completes successfully, the checkpoint may be discarded.
+- after the user fixes the active step and `apply` succeeds, the chain continues automatically only if chain state and checkpoint state remain clean and unambiguous;
+- if the chain completes successfully, one final git commit is created, then the checkpoint may be discarded.
 
 If an active step already exists, return:
 
@@ -317,13 +550,21 @@ Active step already exists.
 Continue the current step before running steps.md.
 ```
 
-If `.codex/steps.md` contains `No pending steps.` or no executable step entries, return:
+If no valid executable step entries exist, return:
 
 ```text
 No pending steps.
 ```
 
-If git sync is unavailable or a reliable checkpoint cannot be created, do not start the chain.
+The literal `No pending steps.` must be ignored when valid executable step entries exist.
+
+If the sync gate fails, git sync is unavailable, or a reliable checkpoint cannot be created, do not start the chain.
+
+If automatic chain continuation after a paused step is unsafe, dirty, or ambiguous, Codex must stop, explain the issue, and require `resync` or manual resolution.
+
+If no commit-worthy changes exist at chain finalization after excluding transient runtime state, Codex must stop and require `resync` or manual resolution.
+
+After a successful chain, Codex may recommend that the user clear or replace `.codex/steps.md`, but it must not change the file automatically.
 
 ## run-steps State Format
 
@@ -342,6 +583,8 @@ Step Chain Mode: none
 ```
 
 The checkpoint id must identify the project and `.codex` state snapshot needed by `abort-steps`.
+
+Updates to step chain state must preserve the current `Strict Mode` value in `.codex/state.md`.
 
 ## abort-steps
 
@@ -373,10 +616,12 @@ resync
 
 Behavior:
 
-- reconciles Codex flow memory with the current project sync state;
+- reconciles Codex flow runtime state with the current project sync state;
 - uses git as the base sync backend;
 - does not apply project code changes;
 - does not create commits;
+- must not modify versioned project files or versioned `.codex` memory;
+- may update only transient workflow runtime state such as `.codex/state.md`;
 - does not continue an active step chain automatically unless state is clean and unambiguous.
 
 Codex must require `resync` when it detects:
@@ -398,13 +643,17 @@ Codex must require `resync` when it detects:
 6. inspect `.codex/reports/`;
 7. inspect `.codex/current-step.md`;
 8. determine whether the mismatch is an uninitialized baseline, external commit, rollback, branch switch, dirty project state, missing report, future report, or unknown flow state;
-9. update Codex memory only when safe;
+9. update transient Codex runtime state only when safe;
 10. never delete reports automatically;
 11. output a clear resync report.
 
-External git commits must not be converted into normal Codex steps. They may be recorded as external sync events if useful.
+`resync` must preserve the current `Strict Mode` value in `.codex/state.md`. If the field is missing, initialize it as `Strict Mode: true`.
 
-If rollback or rewritten history invalidates reports, Codex must mark or explain affected memory as detached/outdated rather than deleting it automatically.
+`resync` may initialize or advance `Last Known Revision` and `Last Known Branch` only when the git working tree is clean, no active normal step is being overwritten, and history/report/current-step state is unambiguous. If versioned project files or versioned `.codex` memory are dirty, `resync` must report the dirty paths and wait for the user to clean the tree or resolve the ambiguity.
+
+External git commits must not be converted into normal Codex steps. They may be recorded in `.codex/state.md` and the resync report as external sync events if useful. `resync` must not append external sync events to `.codex/history.md`.
+
+If rollback or rewritten history invalidates reports, Codex must explain affected memory as detached/outdated in the resync report rather than deleting or rewriting versioned memory automatically.
 
 If an active step was based on an old git revision, Codex must suspend it or require user review.
 

@@ -4,17 +4,21 @@
 
 Step reports preserve why a step was completed the way it was completed.
 
-Project files and optional version-control history store file-level changes. Reports store task context, decisions, reasoning, and implementation meaning.
+Project files and required git history store file-level changes. Reports store task context, decisions, reasoning, and implementation meaning.
 
 ## Short Report
 
 After successful `apply`, Codex shows a short human-readable report.
 
-It should include:
+It must include:
 
 - what was done;
-- sync result, such as a git commit if one was created, or `Sync: none`;
+- sync result, including the git commit created by the completed step;
 - next recommended step.
+
+For a completed step inside an active `run-steps` chain, the sync result must be `Sync: deferred to run-steps finalization`. The final chain report must include the final chain commit hash.
+
+A final chain report is a short user-facing report for the whole `run-steps` chain. It is not stored as `.codex/reports/<id>.md`.
 
 Keep it concise.
 

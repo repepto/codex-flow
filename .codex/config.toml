@@ -1,0 +1,13 @@
+# Project-local Codex defaults for repositories that install this starter pack.
+# Codex loads this file only after the project is trusted.
+
+# Do not pause for approval prompts during normal project work.
+approval_policy = "never"
+
+# Keep filesystem access scoped to the project workspace by default.
+sandbox_mode = "workspace-write"
+
+[sandbox_workspace_write]
+# Allow package managers, test tools, and documentation fetches to use the network
+# inside the workspace sandbox without asking for approval.
+network_access = true
