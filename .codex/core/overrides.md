@@ -46,7 +46,7 @@ If `.codex/overrides/` contains a file that does not correspond to a supported b
 
 ## Merge Behavior
 
-If `.codex/overrides/<file>.md` exists, Codex must apply it together with `.codex/<file>.md`.
+If `.codex/overrides/<file>.md` exists, Codex must apply it together with `.codex/core/<file>.md`.
 
 If no override file exists for a base rule/config file, Codex must use the base file as-is.
 
@@ -73,6 +73,7 @@ Mandatory system actions include:
 - sync gate checks;
 - required git sync backend;
 - uninitialized sync baseline handling;
+- `adopt-step` sync, safety, verification, metadata, and commit requirements;
 - `resync` requirements;
 - clean-tree requirement before `resync` initializes or advances the sync baseline;
 - pre-existing-change stop behavior;

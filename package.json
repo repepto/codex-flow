@@ -1,0 +1,25 @@
+{
+  "name": "codex-flow",
+  "version": "0.1.0",
+  "description": "CLI installer and doctor for the Codex Flow starter pack.",
+  "license": "UNLICENSED",
+  "bin": {
+    "codex-flow": "bin/codex-flow.js"
+  },
+  "files": [
+    "AGENTS.md",
+    "README.md",
+    ".codex/core/",
+    "bin/",
+    "lib/"
+  ],
+  "scripts": {
+    "doctor": "node bin/codex-flow.js doctor",
+    "pack:dry-run": "npm pack --dry-run",
+    "test": "node --test",
+    "check": "npm test && npm run doctor && npm run pack:dry-run"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

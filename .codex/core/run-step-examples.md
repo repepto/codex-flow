@@ -1,9 +1,5 @@
 # Run Step Examples
 
-This file documents example step-plan entries for `.codex/steps.md`.
-
-`run-steps` must never execute this file.
-
 ```md
 ## Define command workflow
 

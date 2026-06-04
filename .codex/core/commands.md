@@ -49,20 +49,22 @@ In Strict Mode, Codex may make factual or technical conclusions only from projec
 
 ## Stability Safety Gate
 
-Before creating or updating workflow state, creating a new active step, continuing an active step, executing a state-changing command, executing a queued `run-steps` item, or running `apply`, Codex must check whether the requested work could damage or weaken the workflow system.
+Before creating or updating workflow state, creating a new active step, continuing an active step, executing a state-changing command, executing a queued `run-steps` item, running `apply`, or running `adopt-step`, Codex must check whether the requested work could damage or weaken the workflow system.
 
 Codex must run this gate for:
 
 - a non-command prompt that would create a new active step;
 - any prompt that would continue an active step;
 - `record` and any other command that creates or updates `.codex/current-step.md` or `.codex/state.md`;
+- `adopt-step` before adopting manual working-tree changes;
 - each executable item read from `.codex/steps.md` before checkpoint creation or execution;
 - `apply`.
 
 Stability-sensitive surfaces include:
 
 - `AGENTS.md`;
-- `.codex/` rule, config, memory, report, checkpoint, and runtime files;
+- `.codex/core/` rule, config, and template files;
+- `.codex/` project memory, report, checkpoint, queue, override, and runtime files;
 - `.gitignore` entries required for `.codex/state.md`, `.codex/checkpoints/`, and `.codex/tmp/`;
 - git sync state, history, reports, step ids, active step state, and run-step checkpoints;
 - command definitions, sync gates, after-step rules, commit rules, report rules, override rules, and mandatory safety rules.
@@ -109,7 +111,9 @@ Before creating a new active step, Codex must pass the sync gate:
 - git must be available as the base sync backend;
 - `.codex/state.md` must have initialized `Last Known Revision` and `Last Known Branch`;
 - the current git revision and branch must match `.codex/state.md`;
-- pre-existing project changes must not be present.
+- pre-existing project changes must not be present, including staged changes, unstaged tracked-file changes, and untracked files that are not ignored by git.
+
+For sync-gate purposes, pre-existing project changes are git-visible local changes that existed before the step or chain started. Ignored transient runtime files do not by themselves block the sync gate, but ambiguous workflow state still requires `resync` or manual resolution.
 
 If the sync gate fails, Codex must not create a new active step.
 
@@ -155,7 +159,7 @@ Working Notes:
 <notes useful for completing this step, or none>
 ```
 
-`Step ID` must be the next report id defined by `.codex/after-step.md`.
+`Step ID` must be the next report id defined by `.codex/core/after-step.md`.
 
 Only `Decisions`, `Open Questions`, and `Working Notes` may be updated during an active step before `apply`, except when `forget` removes recorded decisions.
 
@@ -273,6 +277,64 @@ No active step.
 ```
 
 If pre-existing project changes are detected before starting a new normal step, Codex must stop and require manual cleanup or `resync` after the tree is clean. Codex must not create a special step for pre-existing changes.
+
+The only command that may intentionally convert pre-existing manual working-tree changes into completed Codex step history is `adopt-step "title"`.
+
+## adopt-step
+
+Format:
+
+```text
+adopt-step "title"
+```
+
+`title` must not be empty after trimming whitespace and must not contain line breaks.
+
+Behavior:
+
+- requires no active step;
+- must not run while a `run-steps` chain is active;
+- adopts the current manual working-tree diff as one completed Codex step;
+- is the only command that may intentionally convert pre-existing staged changes, unstaged tracked-file changes, or untracked non-ignored files into a completed Codex step;
+- requires an initialized git sync backend in `.codex/state.md`;
+- requires the current git revision and branch to match `Last Known Revision` and `Last Known Branch` in `.codex/state.md`;
+- requires at least one commit-worthy manual change after excluding transient runtime state;
+- must not treat transient runtime files as commit-worthy payload;
+- must not commit transient runtime files;
+- must run the Stability Safety Gate against the manual diff before running checks or writing completed-step metadata;
+- must run required project checks against the current working tree;
+- if checks fail, stops without creating completed-step metadata, without updating history, without clearing or creating an active step, and without creating a git commit;
+- if checks pass, runs the after-step process for an adopted manual step;
+- writes reports and history that clearly state the step adopted a manual working-tree diff through `adopt-step`;
+- must not invent reasoning that is not supported by the inspected diff or user-provided context;
+- creates exactly one git commit for the adopted step;
+- updates `.codex/state.md` after the commit with the final git revision and `Last Sync Source: adopt-step:<step-id>`.
+
+Manual working-tree diff means all staged changes, unstaged tracked-file changes, and untracked files that are not ignored by git at the moment `adopt-step` starts.
+
+Transient runtime files are:
+
+```text
+.codex/state.md
+.codex/checkpoints/**
+.codex/tmp/**
+```
+
+If no active step exists but the current git revision or branch does not match `.codex/state.md`, Codex must stop and require `resync` or manual resolution before adoption.
+
+If the only changes are transient runtime files, Codex must return:
+
+```text
+No commit-worthy manual changes to adopt.
+```
+
+If an active step already exists, return:
+
+```text
+Active step already exists.
+
+Continue the current step before adopting manual changes.
+```
 
 ## status
 
@@ -521,11 +583,12 @@ If `.codex/steps.md` contains malformed executable items, ambiguous separators, 
 Behavior:
 
 - requires no active step;
+- treats `.codex/steps.md` as project-owned queue storage;
 - reads executable pending steps only from `.codex/steps.md`;
-- never reads or executes `.codex/run-step-examples.md`;
+- never reads or executes `.codex/core/run-step-examples.md`;
 - must run the Stability Safety Gate for every executable pending step before creating the checkpoint or executing any step;
 - before checkpoint creation, must pass the same sync gate used for creating a normal active step;
-- must not start if staged or unstaged pre-existing changes are present;
+- must not start if staged, unstaged, or untracked non-ignored pre-existing changes are present;
 - executes `.codex/steps.md` as an automatic atomic step chain;
 - requires an initialized git sync backend;
 - creates an internal checkpoint sufficient to restore project files and `.codex` state;
@@ -536,6 +599,7 @@ Behavior:
 - accumulated project and `.codex` metadata changes created by earlier chain steps are chain-owned changes and do not count as pre-existing changes for later steps in the same chain;
 - does not mutate `.codex/steps.md`;
 - does not remove or mark completed entries in `.codex/steps.md`;
+- does not store examples in `.codex/steps.md`;
 - executes steps in the order written by the user;
 - each chain step uses the normal `apply` process for implementation, checks, completed-step metadata, and failure handling, except git commit creation is deferred until chain finalization;
 - if a step fails checks, the chain pauses inside that active step;
@@ -649,7 +713,7 @@ Codex must require `resync` when it detects:
 
 `resync` must preserve the current `Strict Mode` value in `.codex/state.md`. If the field is missing, initialize it as `Strict Mode: true`.
 
-`resync` may initialize or advance `Last Known Revision` and `Last Known Branch` only when the git working tree is clean, no active normal step is being overwritten, and history/report/current-step state is unambiguous. If versioned project files or versioned `.codex` memory are dirty, `resync` must report the dirty paths and wait for the user to clean the tree or resolve the ambiguity.
+`resync` may initialize or advance `Last Known Revision` and `Last Known Branch` only when the git working tree is clean, no active normal step is being overwritten, and history/report/current-step state is unambiguous. For `resync`, a clean git working tree means no staged changes, no unstaged tracked-file changes, and no untracked files that are not ignored by git. If versioned project files, versioned `.codex` memory, or untracked non-ignored files are dirty, `resync` must report the dirty paths and wait for the user to clean the tree or resolve the ambiguity.
 
 External git commits must not be converted into normal Codex steps. They may be recorded in `.codex/state.md` and the resync report as external sync events if useful. `resync` must not append external sync events to `.codex/history.md`.
 
