@@ -139,15 +139,18 @@ Last Known Branch: <git branch or none>
 Last Sync Source: <apply:<step-id> | adopt-step:<step-id> | run-steps:<first-id>-<last-id> | resync | external | none>
 Strict Mode: <true | false>
 Step Chain Mode: <none | active>
+Discussion Mode: <none | active>
 ```
 
 State lifecycle:
 
 - missing `.codex/state.md`, `Last Known Revision: none`, or `Last Known Branch: none` means the sync baseline is uninitialized;
 - missing `Strict Mode` means `true` until initialized or changed by the `strict:true` or `strict:false` command;
+- missing `Discussion Mode` means `none` until initialized or changed by the `discuss` or `discuss:close` command;
 - Codex must not start a normal step, `adopt-step`, or `run-steps` while sync state is uninitialized;
+- Codex must not start a normal step, `adopt-step`, or `run-steps` while `Discussion Mode: active`;
 - `resync` may initialize the baseline only after confirming the git project state is clean and unambiguous, with no staged changes, no unstaged tracked-file changes, and no untracked files that are not ignored by git;
-- `strict:true` or `strict:false` may create a missing `.codex/state.md` only as an uninitialized default state skeleton;
+- `strict:true`, `strict:false`, `discuss`, or `discuss:close` may create a missing `.codex/state.md` only as an uninitialized default state skeleton;
 - a new active step must record the current git revision and branch as its base revision and branch;
 - before `apply`, Codex must compare the active step base revision with the current git revision;
 - if the current revision or branch changed outside the Codex flow, Codex must stop and require `resync`;
@@ -156,6 +159,8 @@ State lifecycle:
 - after a successful `run-steps` chain, Codex updates `.codex/state.md` with `Last Sync Source: run-steps:<first-id>-<last-id>` and the final chain commit revision.
 
 When `Step Chain Mode: active`, `.codex/state.md` must also contain the active chain checkpoint id and current chain item as defined in `.codex/core/commands.md`.
+
+When `Discussion Mode: active`, non-command prompts are read-only discussion prompts and must not create active steps or project changes.
 
 Because git commits cannot contain their own final hash, `.codex/state.md` is runtime sync state, not completed step memory.
 

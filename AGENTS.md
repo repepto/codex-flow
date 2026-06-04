@@ -55,6 +55,10 @@ Strict Mode defaults to `true`. If `.codex/state.md` exists and contains `Strict
 
 The `strict:true` and `strict:false` commands may create or update `.codex/state.md` only as transient runtime state. If they create the file, they must keep the git sync baseline uninitialized.
 
+Discussion Mode defaults to `none`. If `.codex/state.md` exists and contains `Discussion Mode: active` or `Discussion Mode: none`, that value is the current discussion mode. If the field is missing, Codex must behave as `Discussion Mode: none`.
+
+The `discuss` and `discuss:close` commands may create or update `.codex/state.md` only as transient runtime state. If they create the file, they must keep the git sync baseline uninitialized. While `Discussion Mode: active`, non-command prompts must be handled as read-only discussion and must not create active steps or modify project files.
+
 If `.codex/overrides/` exists, apply overrides according to `.codex/core/overrides.md`. If it does not exist, continue with the base rule files.
 
 ## Rule And Data Separation
@@ -77,7 +81,7 @@ In Strict Mode, Codex may make factual or technical conclusions only from projec
 
 Before creating a new active step, continuing an active step, running `apply`, or running `adopt-step`, Codex must apply the stability safety gate defined in `.codex/core/commands.md`.
 
-Before creating a new active step, Codex must pass the sync gate defined in `.codex/core/commands.md`.
+Before creating a new active step, Codex must pass the sync gate defined in `.codex/core/commands.md` and must not be in active discussion mode.
 
 For sync-gate purposes, pre-existing project changes include staged changes, unstaged tracked-file changes, and untracked files that are not ignored by git.
 
@@ -85,7 +89,7 @@ Pre-existing project changes block new normal steps and `run-steps`. They may be
 
 During a normal active step, before `apply`, Codex must not modify project files. Before `apply`, Codex may update `.codex/current-step.md` only to create or maintain active step state, decisions, open questions, and working notes.
 
-This normal-step pre-apply restriction does not block standalone workflow commands that are allowed to update workflow runtime state before project execution, including `strict:true`, `strict:false`, `resync`, and `run-steps` checkpoint or chain metadata. These commands must still follow their command-specific rules and must not modify project code unless their rules explicitly allow it.
+This normal-step pre-apply restriction does not block standalone workflow commands that are allowed to update workflow runtime state before project execution, including `strict:true`, `strict:false`, `discuss`, `discuss:close`, `resync`, and `run-steps` checkpoint or chain metadata. These commands must still follow their command-specific rules and must not modify project code unless their rules explicitly allow it.
 
 `apply` is the normal execution command. It must follow `.codex/core/commands.md`, `.codex/core/commit-rules.md`, `.codex/core/after-step.md`, and `.codex/core/step-report-rules.md`.
 

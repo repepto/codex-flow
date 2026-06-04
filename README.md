@@ -145,6 +145,8 @@ apply
 
 ```text
 status
+discuss
+discuss:close
 record:<id> "decision"
 forget:<id>
 forget
@@ -169,6 +171,7 @@ Commands must match exactly. Extra text means it is treated as a normal prompt, 
 ## Important Behavior
 
 - During a normal active step, before `apply`, Codex must not edit project files. It may only maintain `.codex/current-step.md`; standalone runtime commands such as `resync`, `strict:true`, `strict:false`, and `run-steps` may update workflow state as defined by the rule files.
+- Use `discuss` to enter read-only consultation mode before choosing a step. While discussion mode is active, normal prompts do not create steps or edit files; close it with `discuss:close` before starting executable work.
 - If the git tree has staged, unstaged, or untracked non-ignored changes before a new step, Codex stops. Clean it manually, then run `resync`.
 - To intentionally accept manual staged, unstaged, or untracked non-ignored changes as one completed flow step, run `adopt-step "title"` while no step or `run-steps` chain is active.
 - `check` is a read-only review of the current local diff relative to `HEAD`; it can run on a dirty tree and excludes unrelated baseline issues.
@@ -259,9 +262,10 @@ The test suite covers:
 - `run-steps` queue grammar;
 - non-git `init` cancellation;
 - downstream `init` plus `doctor`;
+- installed-project README handling;
 - downstream `update` preserving project-owned state;
 - invalid override rejection;
-- sync-gate behavior for `resync`, normal steps, and `adopt-step`.
+- sync-gate behavior for `resync`, normal steps, discussion mode, and `adopt-step`.
 
 Publish when the package metadata, version, and license are ready:
 
@@ -342,7 +346,31 @@ status
 
 `resync` does not convert external commits into completed Codex steps and does not append them to `.codex/history.md`.
 
-### Example 4: Complete A Normal Codex Step
+### Example 4: Discuss Before Choosing A Step
+
+Use discussion mode when you want advice or exploration without creating an active step:
+
+```text
+discuss
+```
+
+Then ask normal questions:
+
+```text
+Which compact mode implementation would be safest for this project?
+```
+
+When you are ready to work through the normal step flow:
+
+```text
+discuss:close
+```
+
+- `discuss` updates ignored runtime state only; it does not create a step, edit project files, run checks, or create commits.
+- While discussion mode is active, read-only commands such as `status`, `check`, `check:deep`, `compare`, `details`, and `ls-steps:<n>` may still run.
+- State-changing or execution commands such as `apply`, `adopt-step`, and `run-steps` require `discuss:close` first.
+
+### Example 5: Complete A Normal Codex Step
 
 Start with a normal task prompt in Codex chat:
 
@@ -374,7 +402,7 @@ details
 
 - `details` shows the latest full report copied to `.codex/last-report.md`.
 
-### Example 5: Review A Dirty Diff Without Adopting It
+### Example 6: Review A Dirty Diff Without Adopting It
 
 Use this when files are already changed and you want a read-only risk review:
 
@@ -392,7 +420,7 @@ For a whole-project review instead of current-diff review:
 check:deep
 ```
 
-### Example 6: Adopt Manual File Changes As A Completed Step
+### Example 7: Adopt Manual File Changes As A Completed Step
 
 Use this when the user manually edited files and wants those changes recorded as a real Codex Flow step.
 
@@ -414,7 +442,7 @@ adopt-step "Update compact mode manually"
 - On success, it writes a completed report, updates history and next-step recommendation, creates one git commit, and updates `.codex/state.md` with `Last Sync Source: adopt-step:<step-id>`.
 - On check failure, it leaves the manual diff as-is and does not create completed-step metadata or a git commit.
 
-### Example 7: Run A Queued Step Chain
+### Example 8: Run A Queued Step Chain
 
 Edit `.codex/steps.md` with executable items:
 
@@ -451,7 +479,7 @@ run-steps
 - `run-steps` reads `.codex/steps.md`, executes items in order, creates checkpoints, defers intermediate commits, and creates one final git commit for the whole chain.
 - `run-steps` does not clear `.codex/steps.md`; after the chain succeeds, manually clear or replace the queue before running another chain.
 
-### Example 8: Upgrade Codex Flow In A Project
+### Example 9: Upgrade Codex Flow In A Project
 
 Run this from the installed project root:
 

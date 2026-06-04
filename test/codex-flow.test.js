@@ -27,6 +27,8 @@ test('exact workflow command parser accepts only supported exact prompts', () =>
   const validPrompts = [
     'strict:true',
     'strict:false',
+    'discuss',
+    'discuss:close',
     'record:api-v2 "Use the v2 endpoint."',
     'forget:api-v2',
     'forget',
@@ -158,6 +160,7 @@ test('init installs downstream workflow and doctor validates it', () => {
   assert.match(init.stdout, /Created AGENTS.md/);
   assert.equal(fs.existsSync(path.join(target, '.codex/state.md')), true);
   assert.equal(fs.existsSync(path.join(target, '.codex/reports')), true);
+  assert.match(fs.readFileSync(path.join(target, '.codex/state.md'), 'utf8'), /Discussion Mode: none/);
 
   const doctor = runCli(['doctor', '--target', target]);
   assert.equal(doctor.status, 0, doctor.stdout + doctor.stderr);
@@ -234,6 +237,13 @@ test('sync gate evaluators model resync, normal step, and adopt-step blocking st
   assert.equal(evaluateAdoptStepGate(target, 'Adopt manual diff').ok, false);
   assert.match(evaluateAdoptStepGate(target, 'Adopt manual diff').errors.join('\n'), /No commit-worthy/);
 
+  fs.appendFileSync(path.join(target, '.codex/state.md'), 'Discussion Mode: active\n', 'utf8');
+  assert.equal(evaluateNormalStepGate(target).ok, false);
+  assert.match(evaluateNormalStepGate(target).errors.join('\n'), /Discussion mode is active/);
+  assert.equal(evaluateAdoptStepGate(target, 'Adopt manual diff').ok, false);
+  assert.match(evaluateAdoptStepGate(target, 'Adopt manual diff').errors.join('\n'), /Discussion mode is active/);
+  writeInitializedState(target);
+
   fs.writeFileSync(path.join(target, 'manual.txt'), 'manual change\n', 'utf8');
   assert.equal(evaluateNormalStepGate(target).ok, false);
   assert.match(evaluateNormalStepGate(target).errors.join('\n'), /Pre-existing project changes/);
@@ -295,5 +305,6 @@ Last Known Branch: ${branch}
 Last Sync Source: resync
 Strict Mode: true
 Step Chain Mode: none
+Discussion Mode: none
 `, 'utf8');
 }

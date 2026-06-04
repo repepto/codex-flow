@@ -78,6 +78,7 @@ Mandatory system actions include:
 - clean-tree requirement before `resync` initializes or advances the sync baseline;
 - pre-existing-change stop behavior;
 - `Strict Mode` defaulting and preservation in `.codex/state.md`;
+- `Discussion Mode` defaulting, preservation, read-only behavior, and step/execution blocking in `.codex/state.md`;
 - exactly one git commit for each completed normal step;
 - `run-steps` checkpoint, no-intermediate-commit, and single-final-commit behavior;
 - versioned completed-step metadata inclusion in required commit scope;

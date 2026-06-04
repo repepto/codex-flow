@@ -27,6 +27,7 @@ Behavior:
 - may be run whether or not an active step exists;
 - may be run during a paused step chain;
 - may be run when sync state requires `resync`;
+- may be run while discussion mode is active;
 - does not require the sync gate;
 - updates only the `Strict Mode` field in `.codex/state.md` when the file exists;
 - preserves all other `.codex/state.md` fields;
@@ -37,7 +38,7 @@ Behavior:
 
 `strict:true` and `strict:false` are allowed runtime-mode switches. They are not unsafe merely because they update `.codex/state.md`, but they must preserve every other state field and must not be combined with any other requested action.
 
-If `.codex/state.md` is missing, create the default state skeleton with the requested `Strict Mode` value, `Last Known Revision: none`, `Last Known Branch: none`, `Last Sync Source: none`, and `Step Chain Mode: none`.
+If `.codex/state.md` is missing, create the default state skeleton with the requested `Strict Mode` value, `Last Known Revision: none`, `Last Known Branch: none`, `Last Sync Source: none`, `Step Chain Mode: none`, and `Discussion Mode: none`.
 
 Creating this skeleton does not initialize sync. The sync baseline remains uninitialized until a later successful `resync`.
 
@@ -106,6 +107,25 @@ Safe reformulation should preserve required stability content. For example, a re
 
 ## Normal Prompt Behavior
 
+If `Discussion Mode: active` is present in `.codex/state.md`, non-command user prompts are discussion prompts:
+
+- do not create a new active step;
+- do not update `.codex/current-step.md`;
+- do not modify project files, project-owned `.codex` memory, reports, queues, checkpoints, or runtime state;
+- may inspect project files, dependency files, local git state, and command output when needed to answer;
+- must not run project verification commands unless the user explicitly asks for read-only diagnostic output;
+- must not create commits.
+
+While discussion mode is active, state-changing or execution workflow commands other than `strict:true`, `strict:false`, and `discuss:close` must return:
+
+```text
+Discussion mode is active.
+
+Close discussion with discuss:close before running this command.
+```
+
+Read-only commands `status`, `compare`, `check`, `check:deep`, `details`, `details:<id>`, and `ls-steps:<n>` may run while discussion mode is active.
+
 Before creating a new active step, Codex must pass the sync gate:
 
 - git must be available as the base sync backend;
@@ -162,6 +182,54 @@ Working Notes:
 `Step ID` must be the next report id defined by `.codex/core/after-step.md`.
 
 Only `Decisions`, `Open Questions`, and `Working Notes` may be updated during an active step before `apply`, except when `forget` removes recorded decisions.
+
+## discuss
+
+Formats:
+
+```text
+discuss
+discuss:close
+```
+
+Behavior:
+
+- valid only as standalone commands received while Codex is waiting for user input;
+- does not require the sync gate;
+- does not create an active step;
+- does not modify project code;
+- does not run checks;
+- does not create commits.
+
+`discuss` enters read-only discussion mode by setting `Discussion Mode: active` in `.codex/state.md`.
+
+`discuss` must not run while an active step exists. If an active step exists, return:
+
+```text
+Active step already exists.
+
+Continue or complete the current step before starting discussion mode.
+```
+
+`discuss` must not run while a `run-steps` chain is active. If a chain is active, return:
+
+```text
+run-steps chain is active.
+
+Complete or abort the chain before starting discussion mode.
+```
+
+If `.codex/state.md` is missing, `discuss` may create the default state skeleton with `Last Known Revision: none`, `Last Known Branch: none`, `Last Sync Source: none`, `Strict Mode: true`, `Step Chain Mode: none`, and `Discussion Mode: active`. Creating this skeleton does not initialize sync.
+
+When `discuss` succeeds, return a concise message that discussion mode is active and that non-command prompts will not create steps until `discuss:close`.
+
+`discuss:close` exits discussion mode by setting `Discussion Mode: none` in `.codex/state.md`.
+
+`discuss:close` may run when sync state requires `resync` and whether or not discussion mode is already active.
+
+If `.codex/state.md` is missing, `discuss:close` may create the default state skeleton with `Last Known Revision: none`, `Last Known Branch: none`, `Last Sync Source: none`, `Strict Mode: true`, `Step Chain Mode: none`, and `Discussion Mode: none`. Creating this skeleton does not initialize sync.
+
+Updates to discussion mode must preserve all other `.codex/state.md` fields, including `Strict Mode`, sync baseline fields, and active chain metadata.
 
 ## record
 
@@ -355,6 +423,7 @@ Behavior:
 If an active step exists, show:
 
 - Strict Mode;
+- Discussion Mode;
 - Step ID;
 - Task;
 - Decisions;
@@ -365,6 +434,7 @@ If an active step exists, show:
 If no active step exists, show:
 
 - Strict Mode;
+- Discussion Mode;
 - no active step;
 - last completed step if known from history;
 - recommended next step from `.codex/next-step.md`;
@@ -648,7 +718,7 @@ Step Chain Mode: none
 
 The checkpoint id must identify the project and `.codex` state snapshot needed by `abort-steps`.
 
-Updates to step chain state must preserve the current `Strict Mode` value in `.codex/state.md`.
+Updates to step chain state must preserve the current `Strict Mode` and `Discussion Mode` values in `.codex/state.md`.
 
 ## abort-steps
 

@@ -96,6 +96,7 @@ Last Known Branch: none
 Last Sync Source: none
 Strict Mode: true
 Step Chain Mode: none
+Discussion Mode: none
 ```
 
 Creating `.codex/state.md` during bootstrap does not initialize sync. The sync baseline remains uninitialized until a later successful `resync`.

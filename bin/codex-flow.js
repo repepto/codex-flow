@@ -83,6 +83,7 @@ Last Known Branch: none
 Last Sync Source: none
 Strict Mode: true
 Step Chain Mode: none
+Discussion Mode: none
 `]
 ]);
 
@@ -570,6 +571,7 @@ function validateRuleAnchors(targetRoot, errors) {
     ['.codex/core/commands.md', '## Stability Safety Gate'],
     ['.codex/core/commands.md', '## apply'],
     ['.codex/core/commands.md', '## adopt-step'],
+    ['.codex/core/commands.md', '## discuss'],
     ['.codex/core/commands.md', '## run-steps'],
     ['.codex/core/commands.md', '## resync'],
     ['.codex/core/commit-rules.md', 'One completed normal step or adopted manual step must create exactly one git commit.'],
