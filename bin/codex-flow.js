@@ -349,7 +349,9 @@ function doctorProject(options) {
   }
 
   validateRuleAnchors(targetRoot, errors);
-  validateCommandSurface(targetRoot, errors);
+  validateCommandSurface(targetRoot, errors, {
+    validateReadme: sourcePackage
+  });
   validateRunStepsExamples(targetRoot, errors);
   validateGitignore(targetRoot, errors);
   validateOverrides(targetRoot, errors);
@@ -392,23 +394,44 @@ function doctorProject(options) {
   }
 }
 
-function validateCommandSurface(targetRoot, errors) {
+function validateCommandSurface(targetRoot, errors, options = {}) {
   const commandsPath = path.join(targetRoot, '.codex/core/commands.md');
   const readmePath = path.join(targetRoot, 'README.md');
-  if (!pathExists(commandsPath) || !pathExists(readmePath)) {
+  const validateReadme = options.validateReadme === true;
+
+  if (!pathExists(commandsPath)) {
     return;
   }
 
   const coreFormats = extractDocumentedCommandFormats(fs.readFileSync(commandsPath, 'utf8'));
-  const readmeCommands = extractReadmeCommandList(fs.readFileSync(readmePath, 'utf8'));
   const normalizedCore = new Set(coreFormats.map(normalizeCommandFormat));
-  const normalizedReadme = new Set(readmeCommands.map(normalizeCommandFormat));
   const normalizedExpected = new Set(COMMAND_FORMATS.map(normalizeCommandFormat));
 
   for (const expected of normalizedExpected) {
     if (!normalizedCore.has(expected)) {
       errors.push(`.codex/core/commands.md is missing command format: ${expected}`);
     }
+  }
+
+  for (const command of normalizedCore) {
+    if (!normalizedExpected.has(command)) {
+      errors.push(`.codex/core/commands.md documents unsupported workflow command: ${command}`);
+    }
+  }
+
+  if (!validateReadme) {
+    return;
+  }
+
+  if (!pathExists(readmePath)) {
+    errors.push('Missing required file: README.md');
+    return;
+  }
+
+  const readmeCommands = extractReadmeCommandList(fs.readFileSync(readmePath, 'utf8'));
+  const normalizedReadme = new Set(readmeCommands.map(normalizeCommandFormat));
+
+  for (const expected of normalizedExpected) {
     if (!normalizedReadme.has(expected)) {
       errors.push(`README.md command list is missing command format: ${expected}`);
     }
@@ -417,12 +440,6 @@ function validateCommandSurface(targetRoot, errors) {
   for (const command of normalizedReadme) {
     if (!normalizedCore.has(command)) {
       errors.push(`README.md documents unsupported workflow command: ${command}`);
-    }
-  }
-
-  for (const command of normalizedCore) {
-    if (!normalizedExpected.has(command)) {
-      errors.push(`.codex/core/commands.md documents unsupported workflow command: ${command}`);
     }
   }
 

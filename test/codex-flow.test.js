@@ -164,6 +164,21 @@ test('init installs downstream workflow and doctor validates it', () => {
   assert.match(doctor.stdout, /OK: workflow invariants passed/);
 });
 
+test('installed-project doctor does not validate the application README command list', () => {
+  const target = makeTempDir('codex-flow-app-readme-');
+  initGit(target);
+  fs.writeFileSync(path.join(target, 'README.md'), '# App\n\nThis is normal project documentation.\n', 'utf8');
+
+  const init = runCli(['init', '--target', target]);
+  assert.equal(init.status, 0, init.stderr);
+
+  const doctor = runCli(['doctor', '--target', target]);
+  assert.equal(doctor.status, 0, doctor.stdout + doctor.stderr);
+  assert.match(doctor.stdout, /Mode: installed project/);
+  assert.match(doctor.stdout, /OK: workflow invariants passed/);
+  assert.doesNotMatch(doctor.stdout, /README\.md command list is missing/);
+});
+
 test('update replaces package-owned files and preserves project-owned state', () => {
   const target = makeTempDir('codex-flow-update-');
   initGit(target);
