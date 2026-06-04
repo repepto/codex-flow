@@ -1,8 +1,15 @@
 {
-  "name": "codex-flow",
+  "name": "@repepto/codex-flow",
   "version": "0.1.0",
   "description": "CLI installer and doctor for the Codex Flow starter pack.",
   "license": "UNLICENSED",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/repepto/codex-flow.git"
+  },
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com"
+  },
   "bin": {
     "codex-flow": "bin/codex-flow.js"
   },

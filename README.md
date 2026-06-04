@@ -1,6 +1,6 @@
 # Codex Flow
 
-Npm CLI package for installing the Codex Flow starter pack into projects where Codex should work through explicit steps, keep local memory in `.codex/`, and avoid repeated approval prompts after the project is trusted.
+npm CLI package for installing the Codex Flow starter pack into projects where Codex should work through explicit steps, keep local memory in `.codex/`, and avoid repeated approval prompts after the project is trusted.
 
 ## Package Usage
 
@@ -9,18 +9,24 @@ Requires Node.js 18 or newer.
 Run directly with `npx`:
 
 ```bash
-npx codex-flow init
-npx codex-flow update
-npx codex-flow doctor
+npx @repepto/codex-flow init
+npx @repepto/codex-flow update
+npx @repepto/codex-flow doctor
 ```
 
 Or install globally:
 
 ```bash
-npm install -g codex-flow
+npm install -g @repepto/codex-flow
 codex-flow init
 codex-flow update
 codex-flow doctor
+```
+
+The package is published to GitHub Packages. Configure npm authentication before installing or publishing:
+
+```bash
+npm login --scope=@repepto --auth-type=legacy --registry=https://npm.pkg.github.com
 ```
 
 Before the package is published, run the full local check:
@@ -70,7 +76,7 @@ They cover:
 From the project root, run:
 
 ```bash
-npx codex-flow init
+npx @repepto/codex-flow init
 ```
 
 If the project is not already in a git repository, `init` asks whether to create one with `git init`. If the answer is no, `init` exits with status `1` without installing files.
@@ -208,7 +214,7 @@ Before `run-steps`, commit `.codex/steps.md` changes, run `resync`, then run `ru
 From the project root, run:
 
 ```bash
-npx codex-flow update
+npx @repepto/codex-flow update
 ```
 
 Do not replace project-owned state/data files during an upgrade:
@@ -260,6 +266,7 @@ The test suite covers:
 Publish when the package metadata, version, and license are ready:
 
 ```bash
+npm login --scope=@repepto --auth-type=legacy --registry=https://npm.pkg.github.com
 npm publish
 ```
 
@@ -272,16 +279,16 @@ Commands in `bash` blocks run in a terminal. Commands in `text` blocks are exact
 Run this from the project root:
 
 ```bash
-npx codex-flow init
-npx codex-flow doctor
+npx @repepto/codex-flow init
+npx @repepto/codex-flow doctor
 git status --short
 git add AGENTS.md .gitignore .codex/core .codex/context.md .codex/history.md .codex/current-step.md .codex/next-step.md .codex/steps.md .codex/last-report.md
 git commit -m "chore: install codex flow"
 ```
 
-- `npx codex-flow init` first verifies that the project is inside a git repository. If it is not, it asks whether to create one with `git init`; answering no exits with status `1` and does not change the project.
-- After git is available, `npx codex-flow init` installs `AGENTS.md`, `.codex/core/`, bootstrap state/data files, and required runtime `.gitignore` entries.
-- `npx codex-flow doctor` verifies the installed workflow files and required ignores before Codex starts using them.
+- `npx @repepto/codex-flow init` first verifies that the project is inside a git repository. If it is not, it asks whether to create one with `git init`; answering no exits with status `1` and does not change the project.
+- After git is available, `npx @repepto/codex-flow init` installs `AGENTS.md`, `.codex/core/`, bootstrap state/data files, and required runtime `.gitignore` entries.
+- `npx @repepto/codex-flow doctor` verifies the installed workflow files and required ignores before Codex starts using them.
 - `git status --short` shows what was created. `.codex/state.md` should not appear because it is ignored runtime state.
 - `git add ...` stages only versioned workflow files and project-owned memory files. It intentionally excludes `.codex/state.md`, `.codex/checkpoints/`, and `.codex/tmp/`.
 - `git commit ...` records the installed workflow in project history.
@@ -301,7 +308,7 @@ status
 Run this when the workflow looks suspicious, an override was added, `.gitignore` changed, or an upgrade was applied:
 
 ```bash
-npx codex-flow doctor
+npx @repepto/codex-flow doctor
 ```
 
 - `doctor` is read-only. It does not create steps, run project checks, edit files, or create commits.
@@ -449,8 +456,8 @@ run-steps
 Run this from the installed project root:
 
 ```bash
-npx codex-flow update
-npx codex-flow doctor
+npx @repepto/codex-flow update
+npx @repepto/codex-flow doctor
 git diff -- AGENTS.md .codex/core
 git add AGENTS.md .codex/core
 git commit -m "chore: update codex flow"

@@ -100,6 +100,8 @@ const projectOwnedPaths = [
   '.codex/overrides'
 ];
 
+const packageName = '@repepto/codex-flow';
+
 async function main() {
   try {
     const { command, options } = parseArgs(process.argv.slice(2));
@@ -612,8 +614,8 @@ function validatePackageSource(targetRoot, errors) {
   const packageJsonPath = path.join(targetRoot, 'package.json');
   const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8'));
 
-  if (packageJson.name !== 'codex-flow') {
-    errors.push('package.json name must be codex-flow.');
+  if (packageJson.name !== packageName) {
+    errors.push(`package.json name must be ${packageName}.`);
   }
 
   if (!packageJson.bin || packageJson.bin['codex-flow'] !== 'bin/codex-flow.js') {
@@ -675,7 +677,7 @@ function isPackageSource(targetRoot) {
 
   try {
     const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8'));
-    return packageJson.name === 'codex-flow'
+    return packageJson.name === packageName
       && pathExists(path.join(targetRoot, 'AGENTS.md'))
       && pathExists(path.join(targetRoot, '.codex/core/bootstrap.md'));
   } catch (_error) {
