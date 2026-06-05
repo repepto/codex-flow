@@ -487,7 +487,7 @@ When no active step exists, discussion mode is inactive, sync state is initializ
 
 When sync state is missing or uninitialized, `help` must explain the install-to-work sequence:
 
-1. review and commit versioned workflow files created by bootstrap or `init`;
+1. review and commit versioned workflow files created by bootstrap;
 2. make sure the git working tree is clean;
 3. run `resync`;
 4. then send a normal task prompt, run `discuss`, or send an inline multi-step prompt such as `steps: task one /-/ task two`.
