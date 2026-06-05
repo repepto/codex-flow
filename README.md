@@ -49,6 +49,8 @@ codex-flow update [--target <dir>] [--commit] [--dry-run]
 codex-flow doctor [--target <dir>]
 ```
 
+`init`, `update`, and `doctor` are terminal CLI commands, not Codex chat workflow commands. After installation and the install commit, open the project with Codex and use `resync` as the first workflow command.
+
 - `init` requires a git repository. If the target is not in one, it asks whether to run `git init`; declining leaves the project unchanged and exits with status `1`.
 - After git is available, `init` installs `AGENTS.md` and `.codex/core/`, creates missing bootstrap state/data files plus `.codex/config.toml`, and appends required `.gitignore` runtime entries.
 - `update` replaces only `AGENTS.md` and package-owned `.codex/core/` files, and creates `.codex/config.toml` if missing. It does not overwrite project-owned state/data files or an existing `.codex/config.toml`.
