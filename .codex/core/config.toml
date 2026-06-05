@@ -1,5 +1,5 @@
-# Project-local Codex defaults for repositories that install this starter pack.
-# Codex loads this file only after the project is trusted.
+# Template for the project-local .codex/config.toml created by bootstrap.
+# Codex loads .codex/config.toml only after the project is trusted.
 
 # Do not pause for approval prompts during normal project work.
 approval_policy = "never"

@@ -50,24 +50,24 @@ In Strict Mode, Codex may make factual or technical conclusions only from projec
 
 ## Stability Safety Gate
 
-Before creating or updating workflow state, creating a new active step, continuing an active step, executing a state-changing command, executing a queued `run-steps` item, running `apply`, or running `adopt-step`, Codex must check whether the requested work could damage or weaken the workflow system.
+Before creating or updating workflow state, creating a new active step, creating or continuing an inline step chain, continuing an active step, executing a state-changing command, running `apply`, or running `adopt-step`, Codex must check whether the requested work could damage or weaken the workflow system.
 
 Codex must run this gate for:
 
 - a non-command prompt that would create a new active step;
+- each task in an inline multi-step prompt before checkpoint creation or execution;
 - any prompt that would continue an active step;
 - `record` and any other command that creates or updates `.codex/current-step.md` or `.codex/state.md`;
 - `adopt-step` before adopting manual working-tree changes;
-- each executable item read from `.codex/steps.md` before checkpoint creation or execution;
 - `apply`.
 
 Stability-sensitive surfaces include:
 
 - `AGENTS.md`;
 - `.codex/core/` rule, config, and template files;
-- `.codex/` project memory, report, checkpoint, queue, override, and runtime files;
+- `.codex/` project memory, report, checkpoint, override, and runtime files;
 - `.gitignore` entries required for `.codex/state.md`, `.codex/checkpoints/`, and `.codex/tmp/`;
-- git sync state, history, reports, step ids, active step state, and run-step checkpoints;
+- git sync state, history, reports, step ids, active step state, and step-chain checkpoints;
 - command definitions, sync gates, after-step rules, commit rules, report rules, override rules, and mandatory safety rules.
 
 A prompt is unsafe when it asks Codex to delete, overwrite, bypass, disable, weaken, or silently corrupt a stability-sensitive surface, or when the requested change would likely remove required workflow protections.
@@ -111,9 +111,12 @@ If `Discussion Mode: active` is present in `.codex/state.md`, non-command user p
 
 - do not create a new active step;
 - do not update `.codex/current-step.md`;
-- do not modify project files, project-owned `.codex` memory, reports, queues, checkpoints, or runtime state;
-- may inspect project files, dependency files, local git state, and command output when needed to answer;
-- must not run project verification commands unless the user explicitly asks for read-only diagnostic output;
+- do not modify project files, project-owned `.codex` memory, reports, checkpoints, or runtime state;
+- may inspect project files, dependency files, local git state, command output, and external documentation or network resources when needed to answer;
+- may run diagnostic commands, including tests, lint/typecheck/build commands, dependency inspection, and network lookups, when useful for analysis;
+- may perform experimental project edits, generation, installs, builds, migrations, or other mutating diagnostics only in a disposable scratch workspace such as a temp copy, temporary git worktree, or ignored `.codex/tmp/discuss-*` workspace;
+- must preserve the main project workspace exactly as it was before discussion-mode reasoning, except for user-approved in-place diagnostics;
+- must not run commands likely to mutate the main project workspace unless the user explicitly asks for in-place diagnostics and Codex first captures the initial state and states the restore plan;
 - must not create commits.
 
 While discussion mode is active, state-changing or execution workflow commands other than `strict:true`, `strict:false`, and `discuss:close` must return:
@@ -124,7 +127,7 @@ Discussion mode is active.
 Close discussion with discuss:close before running this command.
 ```
 
-Read-only commands `status`, `compare`, `check`, `check:deep`, `details`, `details:<id>`, and `ls-steps:<n>` may run while discussion mode is active.
+Read-only commands `help`, `status`, `compare`, `check`, `check:deep`, `details`, `details:<id>`, and `ls-steps:<n>` may run while discussion mode is active.
 
 Before creating a new active step, Codex must pass the sync gate:
 
@@ -141,7 +144,39 @@ If pre-existing project changes are present before a normal step starts, Codex m
 
 For any other sync-gate failure, Codex must require `resync` or manual resolution.
 
-If no active step exists, the sync gate passes, and the user sends a non-command prompt, Codex must create a new active step in `.codex/current-step.md`. The prompt becomes the task.
+If no active step exists, the sync gate passes, and the user sends a non-command prompt that starts with `steps:`, Codex must first parse it as an inline multi-step prompt according to `Inline Multi-Step Prompts` below.
+
+If the inline multi-step prompt is valid, Codex must create an active step chain instead of a normal single step. If the prompt starts with `steps:` but is invalid, Codex must stop, report the grammar problem, and must not create a normal step from that prompt.
+
+If no active step exists, the sync gate passes, and the user sends any other non-command prompt, Codex must create a new active step in `.codex/current-step.md`. The prompt becomes the task.
+
+After creating a new active step, Codex must respond with a concise step-start report, not a generic waiting message.
+
+The step-start report must include:
+
+- step id and a short task title;
+- changed workflow state, usually `.codex/current-step.md` with the active step, task, base revision, and base branch;
+- an explicit statement that project files have not been modified;
+- expected project-file scope when it can be reasonably inferred from the task or quick inspection.
+
+The step-start report must not claim that project files changed before `apply`.
+
+Example:
+
+```text
+Step 12 created: Add compact mode setting.
+
+Changed:
+- .codex/current-step.md: recorded the active step, task, and git base.
+
+Project files not changed.
+
+Expected scope:
+- src/settings.ts: add compact mode preference handling.
+- test/settings.test.ts: cover persistence.
+
+Next: `apply`.
+```
 
 If an active step exists and the user sends a non-command prompt, Codex must treat it as part of the current step.
 
@@ -211,10 +246,10 @@ Active step already exists.
 Continue or complete the current step before starting discussion mode.
 ```
 
-`discuss` must not run while a `run-steps` chain is active. If a chain is active, return:
+`discuss` must not run while a step chain is active. If a chain is active, return:
 
 ```text
-run-steps chain is active.
+Step chain is active.
 
 Complete or abort the chain before starting discussion mode.
 ```
@@ -333,8 +368,8 @@ Behavior:
 - if checks pass, runs the after-step process;
 - updates Codex memory and reports;
 - for a normal step, uses required git sync and completes the step only after the required git commit succeeds;
-- for an intermediate step inside an active `run-steps` chain, records the required deferred sync state and completes the chain step only after completed-step metadata is written;
-- for final `run-steps` chain finalization, completes the chain only after the required final git commit succeeds.
+- for an intermediate step inside an active step chain, records the required deferred sync state and completes the chain step only after completed-step metadata is written;
+- for final step-chain finalization, completes the chain only after the required final git commit succeeds.
 
 If the required git commit or required deferred chain sync state cannot be created, `apply` must stop and the step or chain must not complete.
 
@@ -361,7 +396,7 @@ adopt-step "title"
 Behavior:
 
 - requires no active step;
-- must not run while a `run-steps` chain is active;
+- must not run while a step chain is active;
 - adopts the current manual working-tree diff as one completed Codex step;
 - is the only command that may intentionally convert pre-existing staged changes, unstaged tracked-file changes, or untracked non-ignored files into a completed Codex step;
 - requires an initialized git sync backend in `.codex/state.md`;
@@ -403,6 +438,86 @@ Active step already exists.
 
 Continue the current step before adopting manual changes.
 ```
+
+## help
+
+Format:
+
+```text
+help
+```
+
+Behavior:
+
+- read-only;
+- shows state-aware guidance for the current workflow state;
+- does not modify files;
+- does not run project verification commands;
+- does not create a step;
+- does not require an active step;
+- does not require the sync gate;
+- does not require a clean working tree;
+- does not require `resync`;
+- may run while discussion mode is active;
+- may run while an active step exists;
+- may run while a step chain is active or paused.
+
+`help` must inspect enough local state to avoid generic advice when state is available:
+
+- git availability, current branch, current revision, and working-tree cleanliness;
+- `.codex/state.md` existence, sync baseline, Strict Mode, Discussion Mode, and Step Chain Mode;
+- `.codex/current-step.md` active or inactive state;
+- active step-chain metadata when present;
+- latest completed step or report availability when useful.
+
+The output must include:
+
+- current workflow state summary;
+- required next action when the workflow is blocked, uninitialized, dirty, ambiguous, in discussion mode, inside an active step, or inside an active/paused step chain;
+- available actions that are valid in the current state;
+- blocked actions and the reason they are blocked;
+- a brief explanation of what each available action will do.
+
+When no active step exists, discussion mode is inactive, sync state is initialized, and the git tree is clean, `help` should explain at least these available paths:
+
+- send a normal task prompt to create a new active step;
+- run `discuss` to enter discussion mode before choosing executable work;
+- send an inline multi-step prompt such as `steps: task one /-/ task two` to execute a step chain;
+- run read-only review commands such as `status`, `check`, `check:deep`, `compare`, `details`, or `ls-steps:<n>` when useful.
+
+When sync state is missing or uninitialized, `help` must explain the install-to-work sequence:
+
+1. review and commit versioned workflow files created by bootstrap or `init`;
+2. make sure the git working tree is clean;
+3. run `resync`;
+4. then send a normal task prompt, run `discuss`, or send an inline multi-step prompt such as `steps: task one /-/ task two`.
+
+When the git tree is dirty before a normal step starts, `help` must distinguish:
+
+- clean or commit the manual changes, then run `resync` when the tree is clean;
+- run `check` for a read-only current-diff review;
+- run `adopt-step "title"` only when the user intentionally wants to convert the manual diff into one completed Codex step and all `adopt-step` gates can pass.
+
+When an active step exists, `help` must explain that a new step, inline step chain, `discuss`, and `adopt-step` are blocked until the current step is completed or resolved. It must list valid current-step actions such as:
+
+- continue discussing or refining the active step;
+- use `record:<id> "description"` to store a decision;
+- use `forget:<id>` or `forget` to remove recorded decisions;
+- run `apply` to execute the active step;
+- run read-only commands such as `status`, `check`, `check:deep`, `compare`, `details`, or `ls-steps:<n>`.
+
+When discussion mode is active, `help` must explain that normal prompts remain discussion prompts and do not create steps. It must list:
+
+- ask questions or request analysis without changing the main workspace;
+- use `discuss:close` before starting executable work;
+- use allowed read-only commands;
+- state-changing or execution commands other than `strict:true`, `strict:false`, and `discuss:close` are blocked until discussion mode is closed.
+
+When a step chain is active or paused, `help` must explain the current chain state, the checkpoint requirement, whether the chain is paused inside an active step, and the valid continuation:
+
+- continue the current chain step and run `apply` when ready, if paused inside a step;
+- run `abort-steps` only to cancel the chain and restore the pre-chain checkpoint;
+- avoid starting discussion mode, new normal steps, inline step chains, or `adopt-step` until the chain is completed or aborted.
 
 ## status
 
@@ -628,69 +743,52 @@ Example output:
 40 | Introduce resync
 ```
 
-## run-steps
+## Inline Multi-Step Prompts
 
-Format:
+Inline multi-step prompts are normal user prompts, not exact-match commands.
+
+Grammar:
 
 ```text
-run-steps
+steps: <task-1> /-/ <task-2> [ /-/ <task-n>]
 ```
 
-Executable step grammar:
+Rules:
 
-- `.codex/steps.md` may contain introductory prose before the first executable item;
-- the literal `No pending steps.` is informational and does not suppress valid executable items;
-- each executable item starts with a second-level Markdown heading: `## <title>`;
-- `<title>` must not be empty;
-- each executable item must contain exactly one `Task:` label before the next item;
-- task text is all non-separator content after `Task:` until the next `---` separator or next `## <title>` item;
-- task text must not be empty after trimming whitespace;
-- `---` separates items and may be omitted after the final item;
-- after the first executable item, content that is not part of an item or separator is invalid.
+- the prompt must start with exact lowercase `steps: `;
+- the prompt must be a single line;
+- tasks must be separated by the exact delimiter ` /-/ `, including one space on both sides;
+- at least two tasks are required;
+- each task must be non-empty after trimming whitespace;
+- `/-/` without the `steps:` prefix is ordinary task text and must not start a chain;
+- if a prompt starts with `steps:` but violates this grammar, Codex must stop and report the grammar error instead of creating a normal step.
 
-If `.codex/steps.md` contains malformed executable items, ambiguous separators, duplicate `Task:` labels in one item, or non-empty item content outside this grammar, Codex must stop before checkpoint creation and report the syntax issue.
+Examples:
+
+```text
+steps: Fix stack overflow in parser /-/ Add compact mode setting /-/ Add compact mode tests
+```
 
 Behavior:
 
 - requires no active step;
-- treats `.codex/steps.md` as project-owned queue storage;
-- reads executable pending steps only from `.codex/steps.md`;
-- never reads or executes `.codex/core/run-step-examples.md`;
-- must run the Stability Safety Gate for every executable pending step before creating the checkpoint or executing any step;
+- must run the Stability Safety Gate for every parsed task before creating the checkpoint or executing any task;
 - before checkpoint creation, must pass the same sync gate used for creating a normal active step;
 - must not start if staged, unstaged, or untracked non-ignored pre-existing changes are present;
-- executes `.codex/steps.md` as an automatic atomic step chain;
 - requires an initialized git sync backend;
 - creates an internal checkpoint sufficient to restore project files and `.codex` state;
 - the checkpoint must include transient `.codex` state that is not committed, including `.codex/state.md`, `.codex/current-step.md`, and any active chain metadata;
-- active chain metadata must be stored in `.codex/state.md`;
+- active chain metadata and the parsed task list must be stored in `.codex/state.md`;
 - creates one git commit for the whole chain, after all chain steps complete successfully;
 - must not create per-step git commits during an active chain;
 - accumulated project and `.codex` metadata changes created by earlier chain steps are chain-owned changes and do not count as pre-existing changes for later steps in the same chain;
-- does not mutate `.codex/steps.md`;
-- does not remove or mark completed entries in `.codex/steps.md`;
-- does not store examples in `.codex/steps.md`;
-- executes steps in the order written by the user;
+- executes tasks in the order written by the user;
 - each chain step uses the normal `apply` process for implementation, checks, completed-step metadata, and failure handling, except git commit creation is deferred until chain finalization;
 - if a step fails checks, the chain pauses inside that active step;
 - after the user fixes the active step and `apply` succeeds, the chain continues automatically only if chain state and checkpoint state remain clean and unambiguous;
 - if the chain completes successfully, one final git commit is created, then the checkpoint may be discarded.
 
-If an active step already exists, return:
-
-```text
-Active step already exists.
-
-Continue the current step before running steps.md.
-```
-
-If no valid executable step entries exist, return:
-
-```text
-No pending steps.
-```
-
-The literal `No pending steps.` must be ignored when valid executable step entries exist.
+If an active step already exists, inline multi-step prompts must be treated as current-step discussion/refinement text, not as a new chain. Codex must explain that a new chain cannot be created while a step is active if the user appears to be trying to start one.
 
 If the sync gate fails, git sync is unavailable, or a reliable checkpoint cannot be created, do not start the chain.
 
@@ -698,16 +796,21 @@ If automatic chain continuation after a paused step is unsafe, dirty, or ambiguo
 
 If no commit-worthy changes exist at chain finalization after excluding transient runtime state, Codex must stop and require `resync` or manual resolution.
 
-After a successful chain, Codex may recommend that the user clear or replace `.codex/steps.md`, but it must not change the file automatically.
+## Step Chain State Format
 
-## run-steps State Format
-
-When a `run-steps` chain is active, `.codex/state.md` must include:
+When a step chain is active, `.codex/state.md` must include:
 
 ```text
 Step Chain Mode: active
 Step Chain Checkpoint: <checkpoint-id>
-Step Chain Current: <step-id or title>
+Step Chain Source: inline
+Step Chain Total: <n>
+Step Chain Index: <current 1-based index>
+Step Chain Current: <current task summary>
+Step Chain Item 1: <task-1>
+Step Chain Item 2: <task-2>
+...
+Step Chain Item <n>: <task-n>
 ```
 
 When no chain is active, `.codex/state.md` must include:
@@ -730,9 +833,9 @@ abort-steps
 
 Behavior:
 
-- cancels an active `run-steps` chain;
-- restores project files and `.codex` state to the checkpoint created before `run-steps`;
-- may use destructive git rollback only to restore the checkpoint created before `run-steps`;
+- cancels an active step chain;
+- restores project files and `.codex` state to the checkpoint created before the chain;
+- may use destructive git rollback only to restore the checkpoint created before the chain;
 - must not perform partial rollback silently;
 - must output an abort report.
 
@@ -799,6 +902,7 @@ The following commands do not exist:
 commit
 commit "message"
 apply-only
+run-steps
 run-steps:auto
 ```
 

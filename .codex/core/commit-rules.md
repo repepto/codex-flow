@@ -4,7 +4,7 @@
 
 This file defines how `apply` and `adopt-step` use git as the default sync backend.
 
-The flow core is step state, reports, history, context, and next-step recommendations. Git is required to detect external project changes, provide rollback/checkpoint support when available, and create the required commit for each completed normal step, adopted manual step, or completed `run-steps` chain.
+The flow core is step state, reports, history, context, and next-step recommendations. Git is required to detect external project changes, provide rollback/checkpoint support when available, and create the required commit for each completed normal step, adopted manual step, or completed inline step chain.
 
 There is no standalone Codex `commit` command. If the user wants manual commits, they should use git directly, after which Codex must reconcile through `resync`.
 
@@ -12,9 +12,9 @@ There is no standalone Codex `commit` command. If the user wants manual commits,
 
 One completed normal step or adopted manual step must create exactly one git commit.
 
-A `run-steps` chain must create exactly one git commit for the whole chain. Intermediate chain steps must not create git commits; their project changes and completed-step metadata remain accumulated chain-owned changes until the chain finalizes.
+An inline step chain must create exactly one git commit for the whole chain. Intermediate chain steps must not create git commits; their project changes and completed-step metadata remain accumulated chain-owned changes until the chain finalizes.
 
-The base workflow requires git sync. If git is unavailable, normal steps, `adopt-step`, and `run-steps` must not start.
+The base workflow requires git sync. If git is unavailable, normal steps, inline step chains, and `adopt-step` must not start.
 
 A successful normal `apply` creates a git commit only when:
 
@@ -28,7 +28,7 @@ Because a successful normal `apply` writes completed-step metadata, a successful
 
 A successful `adopt-step` creates a git commit only when:
 
-- no normal step or `run-steps` chain is active;
+- no normal step or step chain is active;
 - the current git revision and branch match `.codex/state.md`;
 - commit-worthy manual working-tree changes exist after excluding transient runtime state;
 - all required checks pass;
@@ -37,7 +37,7 @@ A successful `adopt-step` creates a git commit only when:
 
 Because a successful `adopt-step` writes completed-step metadata, a successful adopted manual step must create a git commit. If no commit-worthy changes exist after excluding transient runtime state, Codex must stop and require manual cleanup, `resync`, or manual resolution.
 
-During an active `run-steps` chain, `apply` must skip git commit creation for each intermediate chain step. After the final chain step passes verification and completed-step metadata is written, Codex creates one final chain commit when:
+During an active step chain, `apply` must skip git commit creation for each intermediate chain step. After the final chain step passes verification and completed-step metadata is written, Codex creates one final chain commit when:
 
 - the current git revision and branch still match the chain checkpoint base;
 - only chain-owned accumulated changes and allowed versioned Codex metadata are included;
@@ -45,7 +45,7 @@ During an active `run-steps` chain, `apply` must skip git commit creation for ea
 - the changes are allowed by commit rules;
 - the commit is not empty.
 
-Because a successful `run-steps` chain writes completed-step metadata, successful chain finalization must create a git commit. If no commit-worthy changes exist at chain finalization after excluding transient runtime state, the chain state is inconsistent; Codex must stop and require `resync` or manual resolution.
+Because a successful step chain writes completed-step metadata, successful chain finalization must create a git commit. If no commit-worthy changes exist at chain finalization after excluding transient runtime state, the chain state is inconsistent; Codex must stop and require `resync` or manual resolution.
 
 ## Commit Message Format
 
@@ -124,7 +124,7 @@ A completed step implies required verification succeeded. Reports do not need a 
 
 If there are no commit-worthy changes, Codex must not create an empty commit.
 
-For a normal step, adopted manual step, or final `run-steps` chain, absence of commit-worthy changes after successful metadata preparation is inconsistent because completed-step metadata should be commit-worthy. Codex must stop and require `resync` or manual resolution.
+For a normal step, adopted manual step, or final step chain, absence of commit-worthy changes after successful metadata preparation is inconsistent because completed-step metadata should be commit-worthy. Codex must stop and require `resync` or manual resolution.
 
 ## Sync Baseline
 
@@ -136,7 +136,7 @@ Default state format:
 Sync Backend: git
 Last Known Revision: <git revision or none>
 Last Known Branch: <git branch or none>
-Last Sync Source: <apply:<step-id> | adopt-step:<step-id> | run-steps:<first-id>-<last-id> | resync | external | none>
+Last Sync Source: <apply:<step-id> | adopt-step:<step-id> | step-chain:<first-id>-<last-id> | resync | external | none>
 Strict Mode: <true | false>
 Step Chain Mode: <none | active>
 Discussion Mode: <none | active>
@@ -147,8 +147,8 @@ State lifecycle:
 - missing `.codex/state.md`, `Last Known Revision: none`, or `Last Known Branch: none` means the sync baseline is uninitialized;
 - missing `Strict Mode` means `true` until initialized or changed by the `strict:true` or `strict:false` command;
 - missing `Discussion Mode` means `none` until initialized or changed by the `discuss` or `discuss:close` command;
-- Codex must not start a normal step, `adopt-step`, or `run-steps` while sync state is uninitialized;
-- Codex must not start a normal step, `adopt-step`, or `run-steps` while `Discussion Mode: active`;
+- Codex must not start a normal step, inline step chain, or `adopt-step` while sync state is uninitialized;
+- Codex must not start a normal step, inline step chain, or `adopt-step` while `Discussion Mode: active`;
 - `resync` may initialize the baseline only after confirming the git project state is clean and unambiguous, with no staged changes, no unstaged tracked-file changes, and no untracked files that are not ignored by git;
 - `strict:true`, `strict:false`, `discuss`, or `discuss:close` may create a missing `.codex/state.md` only as an uninitialized default state skeleton;
 - a new active step must record the current git revision and branch as its base revision and branch;
@@ -156,7 +156,7 @@ State lifecycle:
 - if the current revision or branch changed outside the Codex flow, Codex must stop and require `resync`;
 - after the Codex-created commit, Codex updates `.codex/state.md` with the new git revision.
 - after a successful `adopt-step`, Codex updates `.codex/state.md` with `Last Sync Source: adopt-step:<step-id>` and the adopted step commit revision.
-- after a successful `run-steps` chain, Codex updates `.codex/state.md` with `Last Sync Source: run-steps:<first-id>-<last-id>` and the final chain commit revision.
+- after a successful step chain, Codex updates `.codex/state.md` with `Last Sync Source: step-chain:<first-id>-<last-id>` and the final chain commit revision.
 
 When `Step Chain Mode: active`, `.codex/state.md` must also contain the active chain checkpoint id and current chain item as defined in `.codex/core/commands.md`.
 
@@ -180,12 +180,11 @@ AGENTS.md
 .codex/core/after-step.md
 .codex/core/step-report-rules.md
 .codex/core/overrides.md
-.codex/core/run-step-examples.md
+.codex/config.toml
 .codex/context.md
 .codex/current-step.md
 .codex/history.md
 .codex/next-step.md
-.codex/steps.md
 .codex/last-report.md
 .codex/reports/<numeric-id>.md
 .codex/overrides/*.md
@@ -205,7 +204,7 @@ Codex must not commit transient runtime state:
 .codex/tmp/**
 ```
 
-Transient runtime state must still be included in `run-steps` checkpoints so `abort-steps` can restore the full flow state.
+Transient runtime state must still be included in step-chain checkpoints so `abort-steps` can restore the full flow state.
 
 `.codex/current-step.md` must not be committed while it contains an active step.
 
@@ -239,7 +238,7 @@ Codex must not create a special active step for pre-existing project changes.
 
 The exact `adopt-step "title"` command is the only exception: it may intentionally adopt pre-existing manual working-tree changes as one completed Codex step when all `adopt-step` gates pass.
 
-During an active `run-steps` chain, accumulated changes created by earlier chain steps are chain-owned changes and do not count as pre-existing changes for later steps in the same chain.
+During an active step chain, accumulated changes created by earlier chain steps are chain-owned changes and do not count as pre-existing changes for later steps in the same chain.
 
 Ignored transient runtime files do not by themselves count as pre-existing project changes, but inconsistent or ambiguous workflow state still requires `resync` or manual resolution.
 
@@ -253,7 +252,7 @@ External commits are not normal Codex steps.
 
 If reset, checkout, rebase, revert, pull, merge, or branch switch changes history unexpectedly, Codex must require `resync`.
 
-Codex must not perform destructive git operations except when executing `abort-steps`, and only to restore the checkpoint created before `run-steps`.
+Codex must not perform destructive git operations except when executing `abort-steps`, and only to restore the checkpoint created before an inline step chain.
 
 ## Apply Finalization Order
 
@@ -276,7 +275,7 @@ If metadata verification fails after git commit creation, Codex state is inconsi
 
 `adopt-step` finalization must follow this order:
 
-1. verify that no active step or active `run-steps` chain exists;
+1. verify that no active step or active step chain exists;
 2. verify the git sync baseline and current branch still match `.codex/state.md`;
 3. inspect the manual working-tree diff and exclude transient runtime state from commit-worthy payload;
 4. run the Stability Safety Gate against the manual diff;
@@ -289,7 +288,7 @@ If metadata verification fails after git commit creation, Codex state is inconsi
 
 If required git commit creation fails after adopted-step metadata was written, Codex must run Required Commit Failure Recovery from `.codex/core/after-step.md`. If exact recovery succeeds, the manual working-tree diff remains the only valid payload for a later `adopt-step` retry. Otherwise Codex must stop and require `resync` or manual resolution.
 
-For an intermediate step inside an active `run-steps` chain, the same order applies except git commit creation is skipped until the chain finalization phase. The required sync result for that intermediate chain step is `Sync: deferred to run-steps finalization`, and the step completes only inside the active chain.
+For an intermediate step inside an active step chain, the same order applies except git commit creation is skipped until the chain finalization phase. The required sync result for that intermediate chain step is `Sync: deferred to step-chain finalization`, and the step completes only inside the active chain.
 
 Chain finalization must then:
 

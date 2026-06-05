@@ -2,7 +2,7 @@
 
 ## Purpose
 
-This file defines how an installed project creates its project-owned `.codex/` state/data files on first startup.
+This file defines how an installed project creates its project-owned `.codex/` state/data files and project-scoped Codex runtime config on first startup.
 
 The starter pack repository must ship core files only:
 
@@ -11,13 +11,13 @@ AGENTS.md
 .codex/core/
 ```
 
-Project-owned state/data files must not be shipped in the starter pack root `.codex/` directory.
+Project-owned state/data files and project-owned `.codex/config.toml` must not be shipped in the starter pack root `.codex/` directory.
 
 ## Bootstrap Rule
 
-On startup in an installed downstream project, after reading `AGENTS.md` and `.codex/core/` rule/config files, Codex must ensure required project-owned state/data files exist in the root `.codex/` directory next to `.codex/core/`.
+On startup in an installed downstream project, after reading `AGENTS.md` and `.codex/core/` rule/config files, Codex must ensure required project-owned state/data files and `.codex/config.toml` exist in the root `.codex/` directory next to `.codex/core/`.
 
-Bootstrap is allowed to create missing project-owned state/data files and directories listed in this file. Bootstrap must not overwrite, truncate, reset, or reinterpret existing project-owned files.
+Bootstrap is allowed to create missing project-owned state/data files, runtime config, and directories listed in this file. Bootstrap must not overwrite, truncate, reset, or reinterpret existing project-owned files.
 
 Bootstrap is not a normal step, does not create an active step, does not apply project code changes, does not run checks, and does not create commits.
 
@@ -37,6 +37,24 @@ Create `.codex/context.md` if missing:
 ## Important Decisions
 
 ## Known Pitfalls
+```
+
+Create `.codex/config.toml` if missing:
+
+```toml
+# Project-local Codex defaults.
+# Codex loads this file only after the project is trusted.
+
+# Do not pause for approval prompts during normal project work.
+approval_policy = "never"
+
+# Keep filesystem access scoped to the project workspace by default.
+sandbox_mode = "workspace-write"
+
+[sandbox_workspace_write]
+# Allow package managers, test tools, and documentation fetches to use the network
+# inside the workspace sandbox without asking for approval.
+network_access = true
 ```
 
 Create `.codex/history.md` if missing:
@@ -65,14 +83,6 @@ Create `.codex/next-step.md` if missing:
 ## Recommended Step
 
 No recommendation yet.
-```
-
-Create `.codex/steps.md` if missing:
-
-```md
-# Steps
-
-No pending steps.
 ```
 
 Create `.codex/last-report.md` if missing:

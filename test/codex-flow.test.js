@@ -16,7 +16,7 @@ const {
   extractDocumentedCommandFormats,
   extractReadmeCommandList,
   normalizeCommandFormat,
-  parseRunStepsQueue,
+  parseInlineStepsPrompt,
   parseWorkflowCommand
 } = require('../lib/workflow');
 
@@ -34,6 +34,7 @@ test('exact workflow command parser accepts only supported exact prompts', () =>
     'forget',
     'apply',
     'adopt-step "Adopt manual changes"',
+    'help',
     'status',
     'compare',
     'compare:feature/settings',
@@ -42,7 +43,6 @@ test('exact workflow command parser accepts only supported exact prompts', () =>
     'details',
     'details:42',
     'ls-steps:3',
-    'run-steps',
     'abort-steps',
     'resync'
   ];
@@ -53,6 +53,7 @@ test('exact workflow command parser accepts only supported exact prompts', () =>
 
   const invalidPrompts = [
     ' status',
+    'help now',
     'status now',
     'record:Api "Uppercase id"',
     'record:bad--id "Bad id"',
@@ -61,6 +62,7 @@ test('exact workflow command parser accepts only supported exact prompts', () =>
     'compare:bad;rm',
     'details:0',
     'ls-steps:0',
+    'run-steps',
     'run-steps:auto',
     'commit',
     'apply\n'
@@ -86,58 +88,36 @@ test('documented command surface stays aligned with executable parser expectatio
   }
 });
 
-test('run-steps queue parser accepts valid queues and rejects ambiguous grammar', () => {
-  const valid = parseRunStepsQueue(`# Steps
-
-No pending steps.
-
-## Add compact mode
-
-Task:
-Add the compact mode setting.
-
----
-
-## Cover compact mode
-Task:
-Add persistence tests.
-`);
+test('inline multi-step prompt parser accepts explicit chains and rejects ambiguous grammar', () => {
+  const valid = parseInlineStepsPrompt('steps: Add compact mode /-/ Cover compact mode');
 
   assert.equal(valid.ok, true);
+  assert.equal(valid.matches, true);
   assert.deepEqual(valid.items, [
-    { title: 'Add compact mode', task: 'Add the compact mode setting.' },
-    { title: 'Cover compact mode', task: 'Add persistence tests.' }
+    { task: 'Add compact mode' },
+    { task: 'Cover compact mode' }
   ]);
 
-  const duplicateTask = parseRunStepsQueue(`## Bad item
+  const ordinaryPrompt = parseInlineStepsPrompt('Add compact mode /-/ Cover compact mode');
+  assert.equal(ordinaryPrompt.ok, true);
+  assert.equal(ordinaryPrompt.matches, false);
+  assert.deepEqual(ordinaryPrompt.items, []);
 
-Task:
-Do one thing.
+  const missingSeparator = parseInlineStepsPrompt('steps: Add compact mode');
+  assert.equal(missingSeparator.ok, false);
+  assert.match(missingSeparator.errors.join('\n'), /exact delimiter/);
 
-Task:
-Do another thing.
-`);
-  assert.equal(duplicateTask.ok, false);
-  assert.match(duplicateTask.errors.join('\n'), /duplicate Task label/);
+  const wrongSeparatorSpacing = parseInlineStepsPrompt('steps: Add compact mode/-/Cover compact mode');
+  assert.equal(wrongSeparatorSpacing.ok, false);
+  assert.match(wrongSeparatorSpacing.errors.join('\n'), /exact delimiter/);
 
-  const emptyTitle = parseRunStepsQueue(`##
+  const emptyTask = parseInlineStepsPrompt('steps: Add compact mode /-/   ');
+  assert.equal(emptyTask.ok, false);
+  assert.match(emptyTask.errors.join('\n'), /task 2 is empty/);
 
-Task:
-Do something.
-`);
-  assert.equal(emptyTitle.ok, false);
-  assert.match(emptyTitle.errors.join('\n'), /title is empty/);
-
-  const contentAfterSeparator = parseRunStepsQueue(`## First
-
-Task:
-Do something.
-
----
-Unexpected prose.
-`);
-  assert.equal(contentAfterSeparator.ok, false);
-  assert.match(contentAfterSeparator.errors.join('\n'), /content after separator/);
+  const multiline = parseInlineStepsPrompt('steps: Add compact mode /-/ Cover compact mode\n');
+  assert.equal(multiline.ok, false);
+  assert.match(multiline.errors.join('\n'), /single line/);
 });
 
 test('init cancellation in non-git targets exits non-zero and leaves target unchanged', () => {
@@ -158,8 +138,10 @@ test('init installs downstream workflow and doctor validates it', () => {
   const init = runCli(['init', '--target', target]);
   assert.equal(init.status, 0, init.stderr);
   assert.match(init.stdout, /Created AGENTS.md/);
+  assert.equal(fs.existsSync(path.join(target, '.codex/config.toml')), true);
   assert.equal(fs.existsSync(path.join(target, '.codex/state.md')), true);
   assert.equal(fs.existsSync(path.join(target, '.codex/reports')), true);
+  assert.match(fs.readFileSync(path.join(target, '.codex/config.toml'), 'utf8'), /approval_policy = "never"/);
   assert.match(fs.readFileSync(path.join(target, '.codex/state.md'), 'utf8'), /Discussion Mode: none/);
 
   const doctor = runCli(['doctor', '--target', target]);
@@ -188,15 +170,88 @@ test('update replaces package-owned files and preserves project-owned state', ()
   assert.equal(runCli(['init', '--target', target]).status, 0);
 
   fs.writeFileSync(path.join(target, '.codex/context.md'), '# Context\n\nSENTINEL context\n', 'utf8');
+  fs.writeFileSync(path.join(target, '.codex/config.toml'), '# Project config\n\nSENTINEL config\n', 'utf8');
   fs.writeFileSync(path.join(target, '.codex/current-step.md'), '# Current Step\n\nSENTINEL current\n', 'utf8');
   fs.writeFileSync(path.join(target, '.codex/core/commands.md'), 'BROKEN CORE\n', 'utf8');
+  fs.writeFileSync(path.join(target, '.codex/core/run-step-examples.md'), 'OBSOLETE CORE\n', 'utf8');
 
   const update = runCli(['update', '--target', target]);
   assert.equal(update.status, 0, update.stderr);
 
   assert.match(fs.readFileSync(path.join(target, '.codex/context.md'), 'utf8'), /SENTINEL context/);
+  assert.match(fs.readFileSync(path.join(target, '.codex/config.toml'), 'utf8'), /SENTINEL config/);
   assert.match(fs.readFileSync(path.join(target, '.codex/current-step.md'), 'utf8'), /SENTINEL current/);
   assert.match(fs.readFileSync(path.join(target, '.codex/core/commands.md'), 'utf8'), /## Exact Match Rule/);
+  assert.equal(fs.existsSync(path.join(target, '.codex/core/run-step-examples.md')), false);
+});
+
+test('update --commit validates and commits package-owned changes only', () => {
+  const target = makeTempDir('codex-flow-update-commit-');
+  initGit(target);
+  assert.equal(runCli(['init', '--target', target]).status, 0);
+  commitVersionedInstall(target);
+
+  fs.writeFileSync(path.join(target, '.codex/context.md'), '# Context\n\nSENTINEL context\n', 'utf8');
+  fs.writeFileSync(path.join(target, '.codex/core/commands.md'), 'BROKEN CORE\n', 'utf8');
+  assert.equal(run('git', ['add', '.codex/context.md', '.codex/core/commands.md'], { cwd: target }).status, 0);
+  assert.equal(run('git', ['commit', '-m', 'chore: simulate old workflow'], { cwd: target }).status, 0);
+
+  const update = runCli(['update', '--commit', '--target', target]);
+  assert.equal(update.status, 0, update.stdout + update.stderr);
+  assert.match(update.stdout, /codex-flow doctor/);
+  assert.match(update.stdout, /Created commit [a-f0-9]+: chore: update codex flow/);
+  assert.match(fs.readFileSync(path.join(target, '.codex/context.md'), 'utf8'), /SENTINEL context/);
+  assert.match(fs.readFileSync(path.join(target, '.codex/core/commands.md'), 'utf8'), /## Exact Match Rule/);
+  assert.equal(run('git', ['log', '-1', '--format=%s'], { cwd: target }).stdout.trim(), 'chore: update codex flow');
+  assert.equal(run('git', ['status', '--short'], { cwd: target }).stdout.trim(), '');
+});
+
+test('update --commit creates missing project config for legacy installs', () => {
+  const target = makeTempDir('codex-flow-update-commit-config-');
+  initGit(target);
+  assert.equal(runCli(['init', '--target', target]).status, 0);
+  commitVersionedInstall(target);
+  fs.rmSync(path.join(target, '.codex/config.toml'));
+  assert.equal(run('git', ['add', '.codex/config.toml'], { cwd: target }).status, 0);
+  assert.equal(run('git', ['commit', '-m', 'chore: simulate legacy install'], { cwd: target }).status, 0);
+
+  const update = runCli(['update', '--commit', '--target', target]);
+  assert.equal(update.status, 0, update.stdout + update.stderr);
+  assert.match(update.stdout, /Created .codex\/config.toml/);
+  assert.match(update.stdout, /Created commit [a-f0-9]+: chore: update codex flow/);
+  assert.match(fs.readFileSync(path.join(target, '.codex/config.toml'), 'utf8'), /approval_policy = "never"/);
+  assert.equal(run('git', ['log', '-1', '--format=%s'], { cwd: target }).stdout.trim(), 'chore: update codex flow');
+  assert.equal(run('git', ['status', '--short'], { cwd: target }).stdout.trim(), '');
+});
+
+test('update --commit rejects pre-existing dirty working trees', () => {
+  const target = makeTempDir('codex-flow-update-commit-dirty-');
+  initGit(target);
+  assert.equal(runCli(['init', '--target', target]).status, 0);
+  commitVersionedInstall(target);
+  fs.writeFileSync(path.join(target, 'manual.txt'), 'manual change\n', 'utf8');
+
+  const update = runCli(['update', '--commit', '--target', target]);
+  assert.equal(update.status, 1);
+  assert.match(update.stderr, /requires a clean git working tree/);
+  assert.match(update.stderr, /manual.txt/);
+  assert.equal(run('git', ['log', '-1', '--format=%s'], { cwd: target }).stdout.trim(), 'chore: install codex flow');
+});
+
+test('update --commit exits cleanly when there are no update changes', () => {
+  const target = makeTempDir('codex-flow-update-commit-noop-');
+  initGit(target);
+  assert.equal(runCli(['init', '--target', target]).status, 0);
+  commitVersionedInstall(target);
+
+  const before = run('git', ['rev-parse', 'HEAD'], { cwd: target }).stdout.trim();
+  const update = runCli(['update', '--commit', '--target', target]);
+  const after = run('git', ['rev-parse', 'HEAD'], { cwd: target }).stdout.trim();
+
+  assert.equal(update.status, 0, update.stdout + update.stderr);
+  assert.match(update.stdout, /No update changes to commit/);
+  assert.equal(after, before);
+  assert.equal(run('git', ['status', '--short'], { cwd: target }).stdout.trim(), '');
 });
 
 test('doctor rejects invalid overrides', () => {

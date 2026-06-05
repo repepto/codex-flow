@@ -10,7 +10,7 @@ Run directly with `npx`:
 
 ```bash
 npx @repepto/codex-flow init
-npx @repepto/codex-flow update
+npx @repepto/codex-flow update --commit
 npx @repepto/codex-flow doctor
 ```
 
@@ -19,7 +19,7 @@ Or install globally:
 ```bash
 npm install -g @repepto/codex-flow
 codex-flow init
-codex-flow update
+codex-flow update --commit
 codex-flow doctor
 ```
 
@@ -45,14 +45,17 @@ node /path/to/codex-flow/bin/codex-flow.js init --target /path/to/project
 
 ```bash
 codex-flow init [--target <dir>] [--force] [--dry-run]
-codex-flow update [--target <dir>] [--dry-run]
+codex-flow update [--target <dir>] [--commit] [--dry-run]
 codex-flow doctor [--target <dir>]
 ```
 
 - `init` requires a git repository. If the target is not in one, it asks whether to run `git init`; declining leaves the project unchanged and exits with status `1`.
-- After git is available, `init` installs `AGENTS.md` and `.codex/core/`, creates missing bootstrap state/data files, and appends required `.gitignore` runtime entries.
-- `update` replaces only `AGENTS.md` and package-owned `.codex/core/` files. It does not touch project-owned state/data files.
-- `doctor` validates the installed workflow shape, required runtime ignores, supported overrides, core rule anchors, command-surface consistency, and `run-steps` examples.
+- After git is available, `init` installs `AGENTS.md` and `.codex/core/`, creates missing bootstrap state/data files plus `.codex/config.toml`, and appends required `.gitignore` runtime entries.
+- `update` replaces only `AGENTS.md` and package-owned `.codex/core/` files, and creates `.codex/config.toml` if missing. It does not overwrite project-owned state/data files or an existing `.codex/config.toml`.
+- `update` removes obsolete package-owned `.codex/core/` files from older starter-pack versions.
+- `update --commit` requires a clean git working tree, runs update, validates the result with the same checks as `doctor`, stages only `AGENTS.md`, `.codex/core/`, and `.codex/config.toml`, and creates `chore: update codex flow` when update changes exist.
+- `update --commit` cannot be combined with `--dry-run`.
+- `doctor` validates the installed workflow shape, required runtime ignores, supported overrides, core rule anchors, and command-surface consistency.
 
 ## Validation Model
 
@@ -62,14 +65,14 @@ They cover:
 
 - exact workflow command parsing;
 - documented command-surface consistency between `.codex/core/commands.md` and `README.md`;
-- removed-command detection for commands such as `commit`, `apply-only`, and `run-steps:auto`;
-- `.codex/steps.md` executable-item grammar for `run-steps`;
+- removed-command detection for commands such as `commit`, `apply-only`, `run-steps`, and `run-steps:auto`;
+- inline multi-step prompt grammar for `steps: task one /-/ task two`;
 - normal-step sync gate evaluation;
 - `resync` clean-tree gate evaluation;
 - `adopt-step` dirty-diff gate evaluation;
 - uninitialized sync-baseline diagnostics that do not report revision or branch mismatches until the baseline exists.
 
-`doctor` uses these helpers for package/install invariants. The automated test suite uses them with temporary downstream projects to exercise install, update, override, non-git, and sync-gate scenarios.
+`doctor` uses these helpers for package/install invariants. The automated test suite uses them with temporary downstream projects to exercise install, update, update commit, override, non-git, and sync-gate scenarios.
 
 ## Install In A Project
 
@@ -88,7 +91,7 @@ AGENTS.md
 .codex/core/
 ```
 
-It also creates missing project-owned `.codex/` state/data files, without overwriting existing ones, and makes sure the project ignores runtime state:
+It also creates missing project-owned `.codex/` state/data files and project-scoped Codex runtime config, without overwriting existing ones, and makes sure the project ignores runtime state:
 
 ```gitignore
 .codex/state.md
@@ -96,24 +99,24 @@ It also creates missing project-owned `.codex/` state/data files, without overwr
 .codex/tmp/
 ```
 
-Commit `AGENTS.md`, `.codex/core/`, the required `.gitignore` entries, and the generated versioned project-owned files before starting the flow.
+Commit `AGENTS.md`, `.codex/core/`, the required `.gitignore` entries, and the generated versioned project-owned files before starting the flow. Do not commit ignored runtime state such as `.codex/state.md`.
 
 Open the project with Codex and trust the project when prompted.
 
 The generated project-owned files include:
 
 ```text
+.codex/config.toml
 .codex/context.md
 .codex/history.md
 .codex/current-step.md
 .codex/next-step.md
-.codex/steps.md
 .codex/last-report.md
 .codex/reports/
 .codex/state.md
 ```
 
-Commit the generated versioned project-owned files before the first `resync`. `.codex/state.md` remains ignored runtime state.
+Commit the generated versioned project-owned files before the first `resync`. `.codex/config.toml` is versioned project runtime config; `.codex/state.md` remains ignored runtime state. `.codex/reports/` may be an empty local directory until the first completed step writes a report file.
 
 After the working tree is clean, run:
 
@@ -130,7 +133,7 @@ After `resync`, normal work can start.
 3. Optionally record decisions:
 
 ```text
-record:<id> "decision"
+record:<id> "description"
 ```
 
 4. Run:
@@ -141,13 +144,20 @@ apply
 
 `apply` performs the work, runs checks, writes reports/history, updates `.codex/current-step.md`, and creates a git commit.
 
+For multiple tasks that should run as one ordered chain, send one single-line prompt:
+
+```text
+steps: first task /-/ second task /-/ third task
+```
+
 ## Commands
 
 ```text
+help
 status
 discuss
 discuss:close
-record:<id> "decision"
+record:<id> "description"
 forget:<id>
 forget
 apply
@@ -156,10 +166,9 @@ details
 details:<id>
 ls-steps:<n>
 compare
-compare:<branch>
+compare:<branch-name>
 check
 check:deep
-run-steps
 abort-steps
 resync
 strict:true
@@ -168,12 +177,16 @@ strict:false
 
 Commands must match exactly. Extra text means it is treated as a normal prompt, not a command.
 
+Use `help` at any point for state-aware guidance. It is read-only and explains what actions are currently available, what actions are blocked, and what the next required step is when the flow is uninitialized, dirty, in discussion mode, inside an active step, or inside a step chain.
+
 ## Important Behavior
 
-- During a normal active step, before `apply`, Codex must not edit project files. It may only maintain `.codex/current-step.md`; standalone runtime commands such as `resync`, `strict:true`, `strict:false`, and `run-steps` may update workflow state as defined by the rule files.
-- Use `discuss` to enter read-only consultation mode before choosing a step. While discussion mode is active, normal prompts do not create steps or edit files; close it with `discuss:close` before starting executable work.
+- During a normal active step, before `apply`, Codex must not edit project files. It may only maintain `.codex/current-step.md`; standalone runtime commands such as `resync`, `strict:true`, and `strict:false` may update workflow state as defined by the rule files.
+- `help` is a read-only state-aware guide. It can run before `resync`, on a dirty tree, during discussion mode, inside an active step, and during an active or paused step chain.
+- After a normal prompt creates an active step, Codex reports the step id, changed workflow state, confirms project files were not modified, and lists expected project-file scope when it can infer one. It must not use a generic "waiting for apply" message.
+- Use `discuss` to enter consultation mode before choosing a step. While discussion mode is active, normal prompts do not create steps, edit the main workspace, or create commits. Codex may run diagnostics and may perform mutating experiments only in a disposable scratch workspace such as a temp copy, temporary git worktree, or ignored `.codex/tmp/discuss-*` path. Close it with `discuss:close` before starting executable work.
 - If the git tree has staged, unstaged, or untracked non-ignored changes before a new step, Codex stops. Clean it manually, then run `resync`.
-- To intentionally accept manual staged, unstaged, or untracked non-ignored changes as one completed flow step, run `adopt-step "title"` while no step or `run-steps` chain is active.
+- To intentionally accept manual staged, unstaged, or untracked non-ignored changes as one completed flow step, run `adopt-step "title"` while no step or step chain is active.
 - `check` is a read-only review of the current local diff relative to `HEAD`; it can run on a dirty tree and excludes unrelated baseline issues.
 - `check:deep` is a read-only whole-project review; it can run on a dirty tree and reports project-wide risks, problems, and recommendations.
 - `resync` initializes or advances the sync baseline only when the git tree has no staged, unstaged, or untracked non-ignored changes and workflow state is unambiguous.
@@ -181,14 +194,14 @@ Commands must match exactly. Extra text means it is treated as a normal prompt, 
 - `.codex/state.md` is local runtime state and must not be committed.
 - `strict:true` and `strict:false` may create `.codex/state.md`, but only with an uninitialized sync baseline.
 - `.codex/current-step.md` is committed only when it is inactive.
-- `run-steps` reads `.codex/steps.md`, runs the listed steps as one chain, and creates one final commit.
-- `abort-steps` restores the checkpoint created before `run-steps`.
+- `steps: task one /-/ task two` starts an inline step chain and creates one final commit after all chain steps pass.
+- `abort-steps` restores the checkpoint created before an inline step chain.
 - Project overrides may extend rules, but cannot replace whole rule files or weaken mandatory safety rules.
 - Codex refuses prompts that would damage workflow stability, explains why, and suggests a safer prompt when possible.
 
 ## Permissions
 
-`.codex/core/config.toml` defines the starter-pack Codex defaults:
+`.codex/core/config.toml` defines the starter-pack defaults that bootstrap copies into project-owned `.codex/config.toml` when that file is missing:
 
 ```toml
 approval_policy = "never"
@@ -198,15 +211,12 @@ sandbox_mode = "workspace-write"
 network_access = true
 ```
 
-The workflow reads this core config only after the project is trusted.
+Codex loads the project-owned `.codex/config.toml` only after the project is trusted.
 
 ## Files Users Usually Touch
 
-- `.codex/steps.md` - queued steps for `run-steps`.
 - `.codex/context.md` - long-lived project knowledge, only when it is truly useful.
 - `.codex/overrides/` - optional project-specific rule extensions.
-
-Before `run-steps`, commit `.codex/steps.md` changes, run `resync`, then run `run-steps`. After `run-steps`, manually clear or replace `.codex/steps.md` before running another chain.
 
 `.codex/core/` is the upgradeable workflow system. Root `.codex` state/data files are project memory maintained by Codex.
 
@@ -217,25 +227,37 @@ Before `run-steps`, commit `.codex/steps.md` changes, run `resync`, then run `ru
 From the project root, run:
 
 ```bash
-npx @repepto/codex-flow update
+npx @repepto/codex-flow update --commit
 ```
 
-Do not replace project-owned state/data files during an upgrade:
+`update --commit` is the normal upgrade path when the working tree is clean. It runs the workflow validation before committing and only stages `AGENTS.md`, `.codex/core/`, and a missing `.codex/config.toml` if the project did not have one yet.
+
+To review the upgrade manually instead, run:
+
+```bash
+npx @repepto/codex-flow update
+npx @repepto/codex-flow doctor
+git diff -- AGENTS.md .codex/core .codex/config.toml
+git add AGENTS.md .codex/core .codex/config.toml
+git commit -m "chore: update codex flow"
+```
+
+Do not replace project-owned state/data files or an existing project `.codex/config.toml` during an upgrade:
 
 ```text
 .codex/context.md
+.codex/config.toml
 .codex/history.md
 .codex/current-step.md
 .codex/next-step.md
 .codex/state.md
-.codex/steps.md
 .codex/last-report.md
 .codex/reports/*
 .codex/checkpoints/
 .codex/tmp/
 ```
 
-Those files contain project memory, queues, reports, checkpoints, or runtime state.
+Those files contain project memory, reports, checkpoints, or runtime state.
 
 ## Package Maintenance
 
@@ -259,11 +281,12 @@ The test suite covers:
 
 - exact command parsing and invalid-command rejection;
 - README/core command-list consistency;
-- `run-steps` queue grammar;
+- inline multi-step prompt grammar;
 - non-git `init` cancellation;
 - downstream `init` plus `doctor`;
 - installed-project README handling;
 - downstream `update` preserving project-owned state;
+- downstream `update --commit` validation, clean-tree gate, no-op handling, and commit creation;
 - invalid override rejection;
 - sync-gate behavior for `resync`, normal steps, discussion mode, and `adopt-step`.
 
@@ -276,7 +299,7 @@ npm publish
 
 ## Examples
 
-Commands in `bash` blocks run in a terminal. Commands in `text` blocks are exact Codex Flow commands sent in a Codex chat after the project is opened.
+Commands in `bash` blocks run in a terminal. Text blocks are Codex chat input after the project is opened; some are exact workflow commands and some are normal task prompts.
 
 ### Example 1: Install From Zero
 
@@ -286,15 +309,15 @@ Run this from the project root:
 npx @repepto/codex-flow init
 npx @repepto/codex-flow doctor
 git status --short
-git add AGENTS.md .gitignore .codex/core .codex/context.md .codex/history.md .codex/current-step.md .codex/next-step.md .codex/steps.md .codex/last-report.md
+git add AGENTS.md .gitignore .codex/core .codex/config.toml .codex/context.md .codex/history.md .codex/current-step.md .codex/next-step.md .codex/last-report.md
 git commit -m "chore: install codex flow"
 ```
 
 - `npx @repepto/codex-flow init` first verifies that the project is inside a git repository. If it is not, it asks whether to create one with `git init`; answering no exits with status `1` and does not change the project.
-- After git is available, `npx @repepto/codex-flow init` installs `AGENTS.md`, `.codex/core/`, bootstrap state/data files, and required runtime `.gitignore` entries.
+- After git is available, `npx @repepto/codex-flow init` installs `AGENTS.md`, `.codex/core/`, `.codex/config.toml`, bootstrap state/data files, and required runtime `.gitignore` entries.
 - `npx @repepto/codex-flow doctor` verifies the installed workflow files and required ignores before Codex starts using them.
 - `git status --short` shows what was created. `.codex/state.md` should not appear because it is ignored runtime state.
-- `git add ...` stages only versioned workflow files and project-owned memory files. It intentionally excludes `.codex/state.md`, `.codex/checkpoints/`, and `.codex/tmp/`.
+- `git add ...` stages only versioned workflow files, project runtime config, and project-owned memory files. It intentionally excludes `.codex/state.md`, `.codex/checkpoints/`, and `.codex/tmp/`.
 - `git commit ...` records the installed workflow in project history.
 
 Then open the project with Codex and run:
@@ -316,7 +339,7 @@ npx @repepto/codex-flow doctor
 ```
 
 - `doctor` is read-only. It does not create steps, run project checks, edit files, or create commits.
-- It verifies required files, core rule anchors, command-surface consistency, `run-steps` examples, required runtime ignores, and supported overrides.
+- It verifies required files, core rule anchors, command-surface consistency, required runtime ignores, and supported overrides.
 - If it reports a missing `.gitignore` entry, restore the required runtime ignores before continuing:
 
 ```gitignore
@@ -366,9 +389,10 @@ When you are ready to work through the normal step flow:
 discuss:close
 ```
 
-- `discuss` updates ignored runtime state only; it does not create a step, edit project files, run checks, or create commits.
-- While discussion mode is active, read-only commands such as `status`, `check`, `check:deep`, `compare`, `details`, and `ls-steps:<n>` may still run.
-- State-changing or execution commands such as `apply`, `adopt-step`, and `run-steps` require `discuss:close` first.
+- `discuss` updates ignored runtime state only; it does not create a step, edit the main workspace, run executable workflow commands, or create commits.
+- Normal discussion prompts may run useful diagnostics, tests, local inspection, or network lookups. Mutating experiments must happen in a disposable scratch workspace such as a temp copy, temporary git worktree, or ignored `.codex/tmp/discuss-*` path.
+- While discussion mode is active, read-only commands such as `help`, `status`, `check`, `check:deep`, `compare`, `details`, and `ls-steps:<n>` may still run.
+- State-changing or execution commands such as `apply` and `adopt-step` require `discuss:close` first. Inline `steps: ... /-/ ...` prompts also remain discussion prompts until discussion mode is closed.
 
 ### Example 5: Complete A Normal Codex Step
 
@@ -391,6 +415,7 @@ apply
 ```
 
 - The normal prompt creates an active step when the sync gate passes.
+- The step-start response reports `.codex/current-step.md` as the only changed file before `apply`, confirms project files are unchanged, and names expected project-file scope when inferable.
 - `record:<id> "decision"` stores a step decision in `.codex/current-step.md`; it does not edit project code.
 - `apply` performs the work, runs required checks, writes reports/history, updates `.codex/current-step.md`, creates one git commit, and updates runtime sync state.
 
@@ -437,58 +462,32 @@ adopt-step "Update compact mode manually"
 ```
 
 - `check` helps review the manual dirty diff before adopting it.
-- `adopt-step "title"` requires no active step, no active `run-steps` chain, an initialized sync baseline, and a current branch/revision that still matches `.codex/state.md`.
+- `adopt-step "title"` requires no active step, no active step chain, an initialized sync baseline, and a current branch/revision that still matches `.codex/state.md`.
 - It runs the Stability Safety Gate and required project checks.
 - On success, it writes a completed report, updates history and next-step recommendation, creates one git commit, and updates `.codex/state.md` with `Last Sync Source: adopt-step:<step-id>`.
 - On check failure, it leaves the manual diff as-is and does not create completed-step metadata or a git commit.
 
-### Example 8: Run A Queued Step Chain
+### Example 8: Run An Inline Step Chain
 
-Edit `.codex/steps.md` with executable items:
-
-```md
-## Add compact mode setting
-
-Task:
-Add the compact mode setting and persist it.
-
----
-
-## Add compact mode tests
-
-Task:
-Cover compact mode persistence with tests.
-```
-
-Commit the queue update manually, then resync:
-
-```bash
-git add .codex/steps.md
-git commit -m "chore: queue codex flow steps"
-```
-
-In Codex chat:
+Use a single-line `steps:` prompt when you want multiple tasks executed in order as one chain:
 
 ```text
-resync
-run-steps
+steps: Add compact mode setting and persist it /-/ Cover compact mode persistence with tests
 ```
 
-- Committing `.codex/steps.md` first keeps the tree clean before `run-steps`.
-- `resync` reconciles Codex Flow with the queue commit.
-- `run-steps` reads `.codex/steps.md`, executes items in order, creates checkpoints, defers intermediate commits, and creates one final git commit for the whole chain.
-- `run-steps` does not clear `.codex/steps.md`; after the chain succeeds, manually clear or replace the queue before running another chain.
+- The prompt must start with exact lowercase `steps: `.
+- Tasks are separated by the exact delimiter ` /-/ `.
+- At least two non-empty tasks are required.
+- Codex creates a checkpoint, executes tasks in order, defers intermediate commits, and creates one final git commit for the whole chain.
+- If a chain step fails checks, the chain pauses inside that active step. Continue fixing it, then run `apply`.
+- `abort-steps` cancels the active chain and restores the pre-chain checkpoint.
 
 ### Example 9: Upgrade Codex Flow In A Project
 
 Run this from the installed project root:
 
 ```bash
-npx @repepto/codex-flow update
-npx @repepto/codex-flow doctor
-git diff -- AGENTS.md .codex/core
-git add AGENTS.md .codex/core
-git commit -m "chore: update codex flow"
+npx @repepto/codex-flow update --commit
 ```
 
 Then in Codex chat:
@@ -497,7 +496,8 @@ Then in Codex chat:
 resync
 ```
 
-- `update` replaces only package-owned workflow files: `AGENTS.md` and `.codex/core/*`.
-- It does not touch `.codex/context.md`, `.codex/history.md`, `.codex/current-step.md`, `.codex/state.md`, `.codex/steps.md`, reports, checkpoints, or tmp files.
-- `doctor` checks the upgraded install before it is committed.
+- `update` replaces package-owned workflow files: `AGENTS.md` and `.codex/core/*`.
+- It removes obsolete package-owned core files from older starter-pack versions.
+- It may create a missing `.codex/config.toml`, but it does not overwrite an existing project config or touch `.codex/context.md`, `.codex/history.md`, `.codex/current-step.md`, `.codex/state.md`, reports, checkpoints, or tmp files.
+- `update --commit` requires a clean git working tree, checks the upgraded install before committing, and creates `chore: update codex flow` only when update changes exist.
 - `resync` makes Codex Flow aware of the upgrade commit after the working tree is clean.

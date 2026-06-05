@@ -35,7 +35,6 @@ history.md
 current-step.md
 next-step.md
 state.md
-steps.md
 last-report.md
 reports/*
 ```
@@ -80,7 +79,7 @@ Mandatory system actions include:
 - `Strict Mode` defaulting and preservation in `.codex/state.md`;
 - `Discussion Mode` defaulting, preservation, read-only behavior, and step/execution blocking in `.codex/state.md`;
 - exactly one git commit for each completed normal step;
-- `run-steps` checkpoint, no-intermediate-commit, and single-final-commit behavior;
+- step-chain checkpoint, no-intermediate-commit, and single-final-commit behavior;
 - versioned completed-step metadata inclusion in required commit scope;
 - no-empty-completion stop behavior after excluding transient runtime state;
 - after-step integrity checks;

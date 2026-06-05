@@ -10,8 +10,7 @@ const {
   REMOVED_COMMANDS,
   extractDocumentedCommandFormats,
   extractReadmeCommandList,
-  normalizeCommandFormat,
-  parseRunStepsQueue
+  normalizeCommandFormat
 } = require('../lib/workflow');
 
 const packageRoot = path.resolve(__dirname, '..');
@@ -23,8 +22,11 @@ const requiredCoreFiles = [
   'commit-rules.md',
   'config.toml',
   'overrides.md',
-  'run-step-examples.md',
   'step-report-rules.md'
+];
+
+const obsoleteCoreFiles = [
+  'run-step-examples.md'
 ];
 
 const requiredGitignoreEntries = [
@@ -41,6 +43,20 @@ const supportedOverrideFiles = new Set([
 ]);
 
 const projectOwnedFileTemplates = new Map([
+  ['.codex/config.toml', `# Project-local Codex defaults.
+# Codex loads this file only after the project is trusted.
+
+# Do not pause for approval prompts during normal project work.
+approval_policy = "never"
+
+# Keep filesystem access scoped to the project workspace by default.
+sandbox_mode = "workspace-write"
+
+[sandbox_workspace_write]
+# Allow package managers, test tools, and documentation fetches to use the network
+# inside the workspace sandbox without asking for approval.
+network_access = true
+`],
   ['.codex/context.md', `# Context
 
 ## Architecture Knowledge
@@ -67,10 +83,6 @@ Last completed step: none
 
 No recommendation yet.
 `],
-  ['.codex/steps.md', `# Steps
-
-No pending steps.
-`],
   ['.codex/last-report.md', `# Last Report
 
 No reports available.
@@ -88,12 +100,12 @@ Discussion Mode: none
 ]);
 
 const projectOwnedPaths = [
+  '.codex/config.toml',
   '.codex/context.md',
   '.codex/history.md',
   '.codex/current-step.md',
   '.codex/next-step.md',
   '.codex/state.md',
-  '.codex/steps.md',
   '.codex/last-report.md',
   '.codex/reports',
   '.codex/checkpoints',
@@ -156,7 +168,8 @@ function parseArgs(args) {
   const options = {
     target: process.cwd(),
     dryRun: false,
-    force: false
+    force: false,
+    commit: false
   };
 
   if (command === '--help' || command === '-h') {
@@ -173,6 +186,11 @@ function parseArgs(args) {
 
     if (arg === '--force') {
       options.force = true;
+      continue;
+    }
+
+    if (arg === '--commit') {
+      options.commit = true;
       continue;
     }
 
@@ -197,6 +215,10 @@ function parseArgs(args) {
     throw new CliError(`Unknown option: ${arg}`, 2, true);
   }
 
+  if (options.commit && command !== 'update') {
+    throw new CliError('--commit is supported only for update.', 2, true);
+  }
+
   options.target = path.resolve(options.target);
   return { command, options };
 }
@@ -206,12 +228,12 @@ function printHelp() {
 
 Usage:
   codex-flow init [--target <dir>] [--force] [--dry-run]
-  codex-flow update [--target <dir>] [--dry-run]
+  codex-flow update [--target <dir>] [--commit] [--dry-run]
   codex-flow doctor [--target <dir>]
 
 Commands:
-  init     Ensure git, install AGENTS.md, .codex/core/, bootstrap state/data, and gitignore entries.
-  update   Replace AGENTS.md and package-owned .codex/core/ files only.
+  init     Ensure git, install AGENTS.md, .codex/core/, .codex/config.toml, state/data, and gitignore entries.
+  update   Replace AGENTS.md and .codex/core/, create missing .codex/config.toml; --commit validates and commits them.
   doctor   Validate package or installed-project workflow invariants.
 `);
 }
@@ -323,8 +345,33 @@ function updateProject(options) {
   const actions = [];
   const warnings = [];
 
+  if (isPackageSource(targetRoot)) {
+    throw new CliError(
+      'Refusing to run update inside the codex-flow package source. Run update in a downstream project.',
+      1
+    );
+  }
+
+  if (options.commit) {
+    if (options.dryRun) {
+      throw new CliError('update --commit cannot be combined with --dry-run.', 2);
+    }
+
+    requireCleanGitWorkingTree(targetRoot, 'update --commit');
+  }
+
   copyStarterTemplates(targetRoot, {
     overwrite: true,
+    dryRun: options.dryRun,
+    actions
+  });
+
+  removeObsoleteCoreFiles(targetRoot, {
+    dryRun: options.dryRun,
+    actions
+  });
+
+  bootstrapProjectConfig(targetRoot, {
     dryRun: options.dryRun,
     actions
   });
@@ -335,10 +382,48 @@ function updateProject(options) {
   }
 
   printActionReport('codex-flow update', targetRoot, actions, warnings, options.dryRun);
+
+  if (!options.commit) {
+    return;
+  }
+
+  console.log('');
+  const doctor = collectDoctorFindings(targetRoot);
+  printDoctorReport(targetRoot, doctor);
+
+  if (doctor.errors.length > 0) {
+    throw new CliError('update --commit stopped because doctor found workflow errors.');
+  }
+
+  const updateCommitPaths = ['AGENTS.md', '.codex/core', '.codex/config.toml'];
+  const changedPaths = getGitStatusForPaths(targetRoot, updateCommitPaths);
+  if (changedPaths.length === 0) {
+    console.log('');
+    console.log('No update changes to commit.');
+    return;
+  }
+
+  runGitOrThrow(targetRoot, ['add', ...updateCommitPaths]);
+  runGitOrThrow(targetRoot, ['commit', '-m', 'chore: update codex flow']);
+  const revision = runGitOrThrow(targetRoot, ['rev-parse', '--short', 'HEAD']).stdout.trim();
+
+  console.log('');
+  console.log(`Created commit ${revision}: chore: update codex flow`);
+  console.log('Next: run resync in Codex chat after the working tree is clean.');
 }
 
 function doctorProject(options) {
   const targetRoot = ensureTargetDirectory(options.target);
+  const findings = collectDoctorFindings(targetRoot);
+
+  printDoctorReport(targetRoot, findings);
+
+  if (findings.errors.length > 0) {
+    process.exit(1);
+  }
+}
+
+function collectDoctorFindings(targetRoot) {
   const errors = [];
   const warnings = [];
   const sourcePackage = isPackageSource(targetRoot);
@@ -353,7 +438,7 @@ function doctorProject(options) {
   validateCommandSurface(targetRoot, errors, {
     validateReadme: sourcePackage
   });
-  validateRunStepsExamples(targetRoot, errors);
+  validateObsoleteCoreFiles(targetRoot, errors);
   validateGitignore(targetRoot, errors);
   validateOverrides(targetRoot, errors);
 
@@ -362,6 +447,12 @@ function doctorProject(options) {
   } else {
     validateInstalledProjectState(targetRoot, warnings);
   }
+
+  return { errors, warnings, sourcePackage };
+}
+
+function printDoctorReport(targetRoot, findings) {
+  const { errors, warnings, sourcePackage } = findings;
 
   console.log('codex-flow doctor');
   console.log(`Target: ${targetRoot}`);
@@ -388,10 +479,6 @@ function doctorProject(options) {
     for (const warning of warnings) {
       console.log(`- ${warning}`);
     }
-  }
-
-  if (errors.length > 0) {
-    process.exit(1);
   }
 }
 
@@ -451,30 +538,26 @@ function validateCommandSurface(targetRoot, errors, options = {}) {
   }
 }
 
-function validateRunStepsExamples(targetRoot, errors) {
-  const examplesPath = path.join(targetRoot, '.codex/core/run-step-examples.md');
-  if (!pathExists(examplesPath)) {
-    return;
-  }
-
-  const content = fs.readFileSync(examplesPath, 'utf8');
-  const blocks = [...content.matchAll(/```md\n([\s\S]*?)```/g)];
-  for (const [index, block] of blocks.entries()) {
-    const result = parseRunStepsQueue(block[1]);
-    if (!result.ok || result.items.length === 0) {
-      errors.push(`.codex/core/run-step-examples.md block ${index + 1} is not valid run-steps grammar.`);
-      for (const error of result.errors) {
-        errors.push(`.codex/core/run-step-examples.md block ${index + 1}: ${error}`);
-      }
-    }
-  }
-}
-
 function copyStarterTemplates(targetRoot, options) {
   copyTemplateFile('AGENTS.md', targetRoot, options);
 
   for (const file of requiredCoreFiles) {
     copyTemplateFile(path.join('.codex/core', file), targetRoot, options);
+  }
+}
+
+function removeObsoleteCoreFiles(targetRoot, options) {
+  for (const file of obsoleteCoreFiles) {
+    const relativePath = path.join('.codex/core', file);
+    const fullPath = path.join(targetRoot, relativePath);
+    if (!pathExists(fullPath)) {
+      continue;
+    }
+
+    options.actions.push(`Removed obsolete ${relativePath}`);
+    if (!options.dryRun) {
+      fs.rmSync(fullPath);
+    }
   }
 }
 
@@ -502,7 +585,13 @@ function copyTemplateFile(relativePath, targetRoot, options) {
 }
 
 function bootstrapProjectState(targetRoot, options) {
+  bootstrapProjectConfig(targetRoot, options);
+
   for (const [relativePath, content] of projectOwnedFileTemplates) {
+    if (relativePath === '.codex/config.toml') {
+      continue;
+    }
+
     const destination = path.join(targetRoot, relativePath);
     if (pathExists(destination)) {
       options.actions.push(`Kept existing ${relativePath}`);
@@ -525,6 +614,21 @@ function bootstrapProjectState(targetRoot, options) {
   options.actions.push('Created .codex/reports/');
   if (!options.dryRun) {
     fs.mkdirSync(reportsDir, { recursive: true });
+  }
+}
+
+function bootstrapProjectConfig(targetRoot, options) {
+  const relativePath = '.codex/config.toml';
+  const destination = path.join(targetRoot, relativePath);
+  if (pathExists(destination)) {
+    options.actions.push(`Kept existing ${relativePath}`);
+    return;
+  }
+
+  options.actions.push(`Created ${relativePath}`);
+  if (!options.dryRun) {
+    fs.mkdirSync(path.dirname(destination), { recursive: true });
+    fs.writeFileSync(destination, projectOwnedFileTemplates.get(relativePath), 'utf8');
   }
 }
 
@@ -572,7 +676,7 @@ function validateRuleAnchors(targetRoot, errors) {
     ['.codex/core/commands.md', '## apply'],
     ['.codex/core/commands.md', '## adopt-step'],
     ['.codex/core/commands.md', '## discuss'],
-    ['.codex/core/commands.md', '## run-steps'],
+    ['.codex/core/commands.md', '## Inline Multi-Step Prompts'],
     ['.codex/core/commands.md', '## resync'],
     ['.codex/core/commit-rules.md', 'One completed normal step or adopted manual step must create exactly one git commit.'],
     ['.codex/core/commit-rules.md', 'Transient Runtime Files'],
@@ -629,6 +733,15 @@ function validateOverrides(targetRoot, errors) {
   }
 }
 
+function validateObsoleteCoreFiles(targetRoot, errors) {
+  for (const file of obsoleteCoreFiles) {
+    const relativePath = path.join('.codex/core', file);
+    if (pathExists(path.join(targetRoot, relativePath))) {
+      errors.push(`${relativePath} is obsolete; run codex-flow update to remove it.`);
+    }
+  }
+}
+
 function validatePackageSource(targetRoot, errors) {
   const packageJsonPath = path.join(targetRoot, 'package.json');
   const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8'));
@@ -666,6 +779,43 @@ function validateInstalledProjectState(targetRoot, warnings) {
   if (!pathExists(path.join(targetRoot, '.codex/reports'))) {
     warnings.push('Missing bootstrap-created directory: .codex/reports/');
   }
+}
+
+function requireCleanGitWorkingTree(targetRoot, actionName) {
+  if (!isGitRepository(targetRoot)) {
+    throw new CliError(`${actionName} requires a git repository.`);
+  }
+
+  const status = runGitOrThrow(targetRoot, ['status', '--porcelain']).stdout.trim();
+  if (status.length > 0) {
+    throw new CliError(`${actionName} requires a clean git working tree before update.\nDirty paths:\n${status}`);
+  }
+}
+
+function getGitStatusForPaths(targetRoot, paths) {
+  const status = runGitOrThrow(targetRoot, ['status', '--porcelain', '--', ...paths]).stdout.trim();
+  if (status.length === 0) {
+    return [];
+  }
+  return status.split(/\r?\n/);
+}
+
+function runGitOrThrow(targetRoot, args) {
+  const result = spawnSync('git', args, {
+    cwd: targetRoot,
+    encoding: 'utf8'
+  });
+
+  if (result.error) {
+    throw new CliError(`Failed to run git ${args[0]}: ${result.error.message}`);
+  }
+
+  if (result.status !== 0) {
+    const detail = (result.stderr || result.stdout || '').trim();
+    throw new CliError(`git ${args.join(' ')} failed.${detail ? `\n${detail}` : ''}`);
+  }
+
+  return result;
 }
 
 function requireFile(targetRoot, relativePath, errors) {
