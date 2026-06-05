@@ -8,16 +8,25 @@ const { spawnSync } = require('node:child_process');
 const test = require('node:test');
 
 const {
+  buildCommitPlan,
+  calculateNextStepId,
   COMMAND_FORMATS,
   REMOVED_COMMANDS,
   evaluateAdoptStepGate,
+  evaluateApplyGate,
+  evaluateApplyPreflight,
   evaluateNormalStepGate,
   evaluateResyncGate,
+  evaluateStartStepGate,
   extractDocumentedCommandFormats,
   extractReadmeCommandList,
+  finalizeStep,
   normalizeCommandFormat,
-  parseInlineStepsPrompt,
-  parseWorkflowCommand
+  parseWorkflowCommand,
+  recordDecision,
+  resyncState,
+  startStep,
+  validateWorkflowState
 } = require('../lib/workflow');
 
 const packageRoot = path.resolve(__dirname, '..');
@@ -43,7 +52,6 @@ test('exact workflow command parser accepts only supported exact prompts', () =>
     'details',
     'details:42',
     'ls-steps:3',
-    'abort-steps',
     'resync'
   ];
 
@@ -64,7 +72,9 @@ test('exact workflow command parser accepts only supported exact prompts', () =>
     'ls-steps:0',
     'run-steps',
     'run-steps:auto',
+    'abort-steps',
     'commit',
+    'steps: Add compact mode /-/ Cover compact mode',
     'apply\n'
   ];
 
@@ -88,36 +98,11 @@ test('documented command surface stays aligned with executable parser expectatio
   }
 });
 
-test('inline multi-step prompt parser accepts explicit chains and rejects ambiguous grammar', () => {
-  const valid = parseInlineStepsPrompt('steps: Add compact mode /-/ Cover compact mode');
+test('steps prompts are no longer special workflow commands', () => {
+  const parsed = parseWorkflowCommand('steps: Add compact mode /-/ Cover compact mode');
 
-  assert.equal(valid.ok, true);
-  assert.equal(valid.matches, true);
-  assert.deepEqual(valid.items, [
-    { task: 'Add compact mode' },
-    { task: 'Cover compact mode' }
-  ]);
-
-  const ordinaryPrompt = parseInlineStepsPrompt('Add compact mode /-/ Cover compact mode');
-  assert.equal(ordinaryPrompt.ok, true);
-  assert.equal(ordinaryPrompt.matches, false);
-  assert.deepEqual(ordinaryPrompt.items, []);
-
-  const missingSeparator = parseInlineStepsPrompt('steps: Add compact mode');
-  assert.equal(missingSeparator.ok, false);
-  assert.match(missingSeparator.errors.join('\n'), /exact delimiter/);
-
-  const wrongSeparatorSpacing = parseInlineStepsPrompt('steps: Add compact mode/-/Cover compact mode');
-  assert.equal(wrongSeparatorSpacing.ok, false);
-  assert.match(wrongSeparatorSpacing.errors.join('\n'), /exact delimiter/);
-
-  const emptyTask = parseInlineStepsPrompt('steps: Add compact mode /-/   ');
-  assert.equal(emptyTask.ok, false);
-  assert.match(emptyTask.errors.join('\n'), /task 2 is empty/);
-
-  const multiline = parseInlineStepsPrompt('steps: Add compact mode /-/ Cover compact mode\n');
-  assert.equal(multiline.ok, false);
-  assert.match(multiline.errors.join('\n'), /single line/);
+  assert.equal(parsed.valid, false);
+  assert.match(parsed.reason, /does not exactly match/);
 });
 
 test('init cancellation in non-git targets exits non-zero and leaves target unchanged', () => {
@@ -318,6 +303,182 @@ Existing active step.
   assert.match(evaluateAdoptStepGate(target, 'Adopt manual diff').errors.join('\n'), /Active step already exists/);
 });
 
+test('state validators compute next step id and validate active apply state', () => {
+  const target = makeTempDir('codex-flow-state-validators-');
+  initGit(target);
+  assert.equal(runCli(['init', '--target', target]).status, 0);
+  commitVersionedInstall(target);
+  writeInitializedState(target);
+
+  const initialStepId = calculateNextStepId(target);
+  assert.equal(initialStepId.ok, true);
+  assert.equal(initialStepId.nextStepId, 1);
+  assert.equal(validateWorkflowState(target).ok, true);
+  assert.equal(evaluateStartStepGate(target).ok, true);
+
+  writeActiveStep(target, 1);
+  const applyGate = evaluateApplyGate(target);
+  assert.equal(applyGate.ok, true, applyGate.errors.join('\n'));
+  assert.equal(evaluateApplyPreflight(target).ok, true);
+
+  writeActiveStep(target, 9);
+  const mismatchedApplyGate = evaluateApplyGate(target);
+  assert.equal(mismatchedApplyGate.ok, false);
+  assert.match(mismatchedApplyGate.errors.join('\n'), /does not match next step id 1/);
+});
+
+test('commit plan excludes transient state and blocks active current-step commits', () => {
+  const target = makeTempDir('codex-flow-commit-plan-');
+  initGit(target);
+  assert.equal(runCli(['init', '--target', target]).status, 0);
+  commitVersionedInstall(target);
+  assert.equal(run('git', ['add', '-f', '.codex/state.md'], { cwd: target }).status, 0);
+  assert.equal(run('git', ['commit', '-m', 'chore: track transient state for guardrail test'], { cwd: target }).status, 0);
+  writeInitializedState(target);
+
+  fs.writeFileSync(path.join(target, 'manual.txt'), 'manual change\n', 'utf8');
+  writeActiveStep(target, 1);
+
+  const plan = buildCommitPlan(target, { requireCommitWorthy: true });
+  assert.equal(plan.ok, false);
+  assert.match(plan.errors.join('\n'), /blocked paths/);
+  assert.deepEqual(plan.details.included.map((change) => change.path), ['manual.txt']);
+  assert.deepEqual(plan.details.excludedTransient.map((change) => change.path), ['.codex/state.md']);
+  assert.deepEqual(plan.details.blocked.map((change) => change.path), ['.codex/current-step.md']);
+});
+
+test('internal CLI exposes JSON guardrails without changing public help', () => {
+  const target = makeTempDir('codex-flow-internal-cli-');
+  initGit(target);
+  assert.equal(runCli(['init', '--target', target]).status, 0);
+  commitVersionedInstall(target);
+  writeInitializedState(target);
+
+  const help = runCli(['--help']);
+  assert.equal(help.status, 0);
+  assert.doesNotMatch(help.stdout, /internal/);
+
+  const parse = runCli(['internal', 'parse-command', '--prompt', 'apply', '--target', target]);
+  assert.equal(parse.status, 0, parse.stderr);
+  assert.equal(JSON.parse(parse.stdout).command, 'apply');
+
+  const next = runCli(['internal', 'next-step-id', '--target', target]);
+  assert.equal(next.status, 0, next.stderr);
+  assert.equal(JSON.parse(next.stdout).nextStepId, 1);
+
+  const preflightWithoutStep = runCli(['internal', 'preflight', 'apply', '--target', target]);
+  assert.equal(preflightWithoutStep.status, 1);
+  assert.match(JSON.parse(preflightWithoutStep.stdout).errors.join('\n'), /No active step/);
+
+  const startGate = runCli(['internal', 'gate', 'start-step', '--target', target]);
+  assert.equal(startGate.status, 0, startGate.stdout + startGate.stderr);
+  assert.equal(JSON.parse(startGate.stdout).ok, true);
+
+  fs.writeFileSync(path.join(target, 'manual.txt'), 'manual change\n', 'utf8');
+  const dirtyStartGate = runCli(['internal', 'gate', 'start-step', '--target', target]);
+  assert.equal(dirtyStartGate.status, 1);
+  assert.match(JSON.parse(dirtyStartGate.stdout).errors.join('\n'), /Pre-existing project changes/);
+
+  const adoptGate = runCli(['internal', 'gate', 'adopt-step', '--title', 'Adopt manual diff', '--target', target]);
+  assert.equal(adoptGate.status, 0, adoptGate.stdout + adoptGate.stderr);
+  assert.equal(JSON.parse(adoptGate.stdout).ok, true);
+});
+
+test('internal normal flow runs resync, task, record, apply finalization, report, and clean state', () => {
+  const target = makeTempDir('codex-flow-normal-flow-');
+  initGit(target);
+  assert.equal(runCli(['init', '--target', target]).status, 0);
+  commitVersionedInstall(target);
+
+  let result = runCli(['internal', 'state', 'resync', '--target', target]);
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  assert.equal(JSON.parse(result.stdout).details.state.fields['Last Sync Source'], 'resync');
+
+  result = runCli(['internal', 'state', 'start-step', '--prompt', 'Add hello file', '--target', target]);
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  assert.equal(JSON.parse(result.stdout).details.stepId, 1);
+
+  result = runCli([
+    'internal',
+    'state',
+    'record',
+    '--id',
+    'hello-file',
+    '--description',
+    'Create a small hello.txt fixture.',
+    '--target',
+    target
+  ]);
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+
+  fs.writeFileSync(path.join(target, 'hello.txt'), 'hello\n', 'utf8');
+
+  result = runCli(['internal', 'preflight', 'apply', '--target', target]);
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  assert.deepEqual(JSON.parse(result.stdout).details.commitPlan.details.included.map((change) => change.path), ['hello.txt']);
+
+  result = runCli([
+    'internal',
+    'state',
+    'finalize-step',
+    '--title',
+    'Add hello file',
+    '--summary',
+    'Added a hello fixture.',
+    '--implementation',
+    'Added hello.txt and recorded the completed step metadata.',
+    '--message',
+    'chore: add hello file',
+    '--target',
+    target
+  ]);
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  const finalization = JSON.parse(result.stdout);
+  assert.equal(finalization.details.stepId, 1);
+  assert.match(finalization.details.commit, /^[a-f0-9]{40}$/);
+
+  assert.equal(fs.existsSync(path.join(target, '.codex/reports/1.md')), true);
+  assert.match(fs.readFileSync(path.join(target, '.codex/history.md'), 'utf8'), /## Step 1/);
+  assert.match(fs.readFileSync(path.join(target, '.codex/current-step.md'), 'utf8'), /No active step/);
+  assert.match(fs.readFileSync(path.join(target, '.codex/state.md'), 'utf8'), /Last Sync Source: apply:1/);
+  assert.equal(run('git', ['status', '--short'], { cwd: target }).stdout.trim(), '');
+  assert.equal(run('git', ['log', '-1', '--format=%s'], { cwd: target }).stdout.trim(), 'chore: add hello file');
+});
+
+test('internal finalize-step restores active state when commit creation fails', () => {
+  const target = makeTempDir('codex-flow-finalize-failure-');
+  initGit(target);
+  assert.equal(runCli(['init', '--target', target]).status, 0);
+  commitVersionedInstall(target);
+  assert.equal(runCli(['internal', 'state', 'resync', '--target', target]).status, 0);
+  assert.equal(runCli(['internal', 'state', 'start-step', '--prompt', 'Add blocked file', '--target', target]).status, 0);
+  fs.writeFileSync(path.join(target, 'blocked.txt'), 'blocked\n', 'utf8');
+
+  const hookPath = path.join(target, '.git/hooks/pre-commit');
+  fs.writeFileSync(hookPath, '#!/bin/sh\nexit 1\n', 'utf8');
+  fs.chmodSync(hookPath, 0o755);
+
+  const result = runCli([
+    'internal',
+    'state',
+    'finalize-step',
+    '--title',
+    'Add blocked file',
+    '--message',
+    'chore: blocked commit',
+    '--target',
+    target
+  ]);
+
+  assert.equal(result.status, 1);
+  assert.match(JSON.parse(result.stdout).errors.join('\n'), /git commit failed/);
+  assert.equal(fs.existsSync(path.join(target, '.codex/reports/1.md')), false);
+  assert.match(fs.readFileSync(path.join(target, '.codex/current-step.md'), 'utf8'), /Status: active/);
+  assert.doesNotMatch(fs.readFileSync(path.join(target, '.codex/history.md'), 'utf8'), /## Step 1/);
+  assert.equal(run('git', ['log', '-1', '--format=%s'], { cwd: target }).stdout.trim(), 'chore: install codex flow');
+  assert.match(run('git', ['status', '--short'], { cwd: target }).stdout, /blocked\.txt/);
+});
+
 function makeTempDir(prefix) {
   return fs.mkdtempSync(path.join(os.tmpdir(), prefix));
 }
@@ -359,7 +520,33 @@ Last Known Revision: ${revision}
 Last Known Branch: ${branch}
 Last Sync Source: resync
 Strict Mode: true
-Step Chain Mode: none
 Discussion Mode: none
+`, 'utf8');
+}
+
+function writeActiveStep(target, stepId) {
+  const revision = run('git', ['rev-parse', 'HEAD'], { cwd: target }).stdout.trim();
+  const branch = run('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: target }).stdout.trim();
+  fs.writeFileSync(path.join(target, '.codex/current-step.md'), `# Current Step
+
+Status: active
+Step ID: ${stepId}
+
+Task:
+Existing active step.
+
+Base Sync:
+Backend: git
+Base Revision: ${revision}
+Base Branch: ${branch}
+
+Decisions:
+none
+
+Open Questions:
+none
+
+Working Notes:
+none
 `, 'utf8');
 }

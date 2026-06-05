@@ -105,7 +105,6 @@ Last Known Revision: none
 Last Known Branch: none
 Last Sync Source: none
 Strict Mode: true
-Step Chain Mode: none
 Discussion Mode: none
 ```
 
@@ -113,13 +112,12 @@ Creating `.codex/state.md` during bootstrap does not initialize sync. The sync b
 
 ## Files Not Created By Bootstrap
 
-Bootstrap must not create completed step reports, checkpoint files, tmp files, or project override files.
+Bootstrap must not create completed step reports, tmp files, or project override files.
 
 These paths are created only by their owning workflow actions or by the user:
 
 ```text
 .codex/reports/<numeric-id>.md
-.codex/checkpoints/
 .codex/tmp/
 .codex/overrides/
 ```

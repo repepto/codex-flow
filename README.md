@@ -67,14 +67,36 @@ They cover:
 
 - exact workflow command parsing;
 - documented command-surface consistency between `.codex/core/commands.md` and `README.md`;
-- removed-command detection for commands such as `commit`, `apply-only`, `run-steps`, and `run-steps:auto`;
-- inline multi-step prompt grammar for `steps: task one /-/ task two`;
+- removed-command detection for commands such as `commit`, `apply-only`, `run-steps`, `run-steps:auto`, and `abort-steps`;
 - normal-step sync gate evaluation;
+- workflow state validation for `.codex/state.md`, `.codex/current-step.md`, history, reports, and next step id calculation;
+- `apply` preflight validation for active step id, base revision, base branch, and discussion-mode blockers;
+- commit-plan validation that excludes transient runtime state and blocks active `.codex/current-step.md` from commit scope;
 - `resync` clean-tree gate evaluation;
 - `adopt-step` dirty-diff gate evaluation;
 - uninitialized sync-baseline diagnostics that do not report revision or branch mismatches until the baseline exists.
 
-`doctor` uses these helpers for package/install invariants. The automated test suite uses them with temporary downstream projects to exercise install, update, update commit, override, non-git, and sync-gate scenarios.
+`doctor` uses these helpers for package/install invariants. The CLI also exposes hidden JSON guardrails for Codex automation:
+
+```bash
+codex-flow internal parse-command --prompt 'apply'
+codex-flow internal validate-state
+codex-flow internal next-step-id
+codex-flow internal commit-plan --require-commit-worthy
+codex-flow internal preflight apply
+codex-flow internal state resync
+codex-flow internal state start-step --prompt 'Add compact mode'
+codex-flow internal state record --id compact-mode --description 'Store the preference locally.'
+codex-flow internal state finalize-step --title 'Add compact mode'
+codex-flow internal gate start-step
+codex-flow internal gate apply
+codex-flow internal gate adopt-step --title 'Adopt manual diff'
+codex-flow internal gate resync
+```
+
+These `internal` CLI helpers are not chat workflow commands and are intentionally omitted from the user command list. They let Codex ask the CLI for binary preflight answers without changing the prompts users send in chat.
+
+The automated test suite uses temporary downstream projects to exercise install, update, update commit, override, non-git, sync-gate, state-validation, apply-preflight, commit-plan, internal-CLI, and normal-flow end-to-end scenarios.
 
 ## Install In A Project
 
@@ -97,7 +119,6 @@ It also creates missing project-owned `.codex/` state/data files and project-sco
 
 ```gitignore
 .codex/state.md
-.codex/checkpoints/
 .codex/tmp/
 ```
 
@@ -146,11 +167,7 @@ apply
 
 `apply` performs the work, runs checks, writes reports/history, updates `.codex/current-step.md`, and creates a git commit.
 
-For multiple tasks that should run as one ordered chain, send one single-line prompt:
-
-```text
-steps: first task /-/ second task /-/ third task
-```
+For multiple related tasks that should land in one commit, describe them in one normal prompt. Codex treats the whole prompt as one active step.
 
 ## Commands
 
@@ -171,7 +188,6 @@ compare
 compare:<branch-name>
 check
 check:deep
-abort-steps
 resync
 strict:true
 strict:false
@@ -179,16 +195,16 @@ strict:false
 
 Commands must match exactly. Extra text means it is treated as a normal prompt, not a command.
 
-Use `help` at any point for state-aware guidance. It is read-only and explains what actions are currently available, what actions are blocked, and what the next required step is when the flow is uninitialized, dirty, in discussion mode, inside an active step, or inside a step chain.
+Use `help` at any point for state-aware guidance. It is read-only and explains what actions are currently available, what actions are blocked, and what the next required step is when the flow is uninitialized, dirty, in discussion mode, or inside an active step.
 
 ## Important Behavior
 
 - During a normal active step, before `apply`, Codex must not edit project files. It may only maintain `.codex/current-step.md`; standalone runtime commands such as `resync`, `strict:true`, and `strict:false` may update workflow state as defined by the rule files.
-- `help` is a read-only state-aware guide. It can run before `resync`, on a dirty tree, during discussion mode, inside an active step, and during an active or paused step chain.
+- `help` is a read-only state-aware guide. It can run before `resync`, on a dirty tree, during discussion mode, and inside an active step.
 - After a normal prompt creates an active step, Codex reports the step id, changed workflow state, confirms project files were not modified, and lists expected project-file scope when it can infer one. It must not use a generic "waiting for apply" message.
 - Use `discuss` to enter consultation mode before choosing a step. While discussion mode is active, normal prompts do not create steps, edit the main workspace, or create commits. Codex may run diagnostics and may perform mutating experiments only in a disposable scratch workspace such as a temp copy, temporary git worktree, or ignored `.codex/tmp/discuss-*` path. Close it with `discuss:close` before starting executable work.
 - If the git tree has staged, unstaged, or untracked non-ignored changes before a new step, Codex stops. Clean it manually, then run `resync`.
-- To intentionally accept manual staged, unstaged, or untracked non-ignored changes as one completed flow step, run `adopt-step "title"` while no step or step chain is active.
+- To intentionally accept manual staged, unstaged, or untracked non-ignored changes as one completed flow step, run `adopt-step "title"` while no step is active.
 - `check` is a read-only review of the current local diff relative to `HEAD`; it can run on a dirty tree and excludes unrelated baseline issues.
 - `check:deep` is a read-only whole-project review; it can run on a dirty tree and reports project-wide risks, problems, and recommendations.
 - `resync` initializes or advances the sync baseline only when the git tree has no staged, unstaged, or untracked non-ignored changes and workflow state is unambiguous.
@@ -196,8 +212,6 @@ Use `help` at any point for state-aware guidance. It is read-only and explains w
 - `.codex/state.md` is local runtime state and must not be committed.
 - `strict:true` and `strict:false` may create `.codex/state.md`, but only with an uninitialized sync baseline.
 - `.codex/current-step.md` is committed only when it is inactive.
-- `steps: task one /-/ task two` starts an inline step chain and creates one final commit after all chain steps pass.
-- `abort-steps` restores the checkpoint created before an inline step chain.
 - Project overrides may extend rules, but cannot replace whole rule files or weaken mandatory safety rules.
 - Codex refuses prompts that would damage workflow stability, explains why, and suggests a safer prompt when possible.
 
@@ -255,11 +269,10 @@ Do not replace project-owned state/data files or an existing project `.codex/con
 .codex/state.md
 .codex/last-report.md
 .codex/reports/*
-.codex/checkpoints/
 .codex/tmp/
 ```
 
-Those files contain project memory, reports, checkpoints, or runtime state.
+Those files contain project memory, reports, or runtime state.
 
 ## Package Maintenance
 
@@ -283,7 +296,6 @@ The test suite covers:
 
 - exact command parsing and invalid-command rejection;
 - README/core command-list consistency;
-- inline multi-step prompt grammar;
 - non-git `init` cancellation;
 - downstream `init` plus `doctor`;
 - installed-project README handling;
@@ -319,7 +331,7 @@ git commit -m "chore: install codex flow"
 - After git is available, `npx @repepto/codex-flow init` installs `AGENTS.md`, `.codex/core/`, `.codex/config.toml`, bootstrap state/data files, and required runtime `.gitignore` entries.
 - `npx @repepto/codex-flow doctor` verifies the installed workflow files and required ignores before Codex starts using them.
 - `git status --short` shows what was created. `.codex/state.md` should not appear because it is ignored runtime state.
-- `git add ...` stages only versioned workflow files, project runtime config, and project-owned memory files. It intentionally excludes `.codex/state.md`, `.codex/checkpoints/`, and `.codex/tmp/`.
+- `git add ...` stages only versioned workflow files, project runtime config, and project-owned memory files. It intentionally excludes `.codex/state.md` and `.codex/tmp/`.
 - `git commit ...` records the installed workflow in project history.
 
 Then open the project with Codex and run:
@@ -346,7 +358,6 @@ npx @repepto/codex-flow doctor
 
 ```gitignore
 .codex/state.md
-.codex/checkpoints/
 .codex/tmp/
 ```
 
@@ -394,7 +405,7 @@ discuss:close
 - `discuss` updates ignored runtime state only; it does not create a step, edit the main workspace, run executable workflow commands, or create commits.
 - Normal discussion prompts may run useful diagnostics, tests, local inspection, or network lookups. Mutating experiments must happen in a disposable scratch workspace such as a temp copy, temporary git worktree, or ignored `.codex/tmp/discuss-*` path.
 - While discussion mode is active, read-only commands such as `help`, `status`, `check`, `check:deep`, `compare`, `details`, and `ls-steps:<n>` may still run.
-- State-changing or execution commands such as `apply` and `adopt-step` require `discuss:close` first. Inline `steps: ... /-/ ...` prompts also remain discussion prompts until discussion mode is closed.
+- State-changing or execution commands such as `apply` and `adopt-step` require `discuss:close` first. Normal prompts also remain discussion prompts until discussion mode is closed.
 
 ### Example 5: Complete A Normal Codex Step
 
@@ -464,25 +475,22 @@ adopt-step "Update compact mode manually"
 ```
 
 - `check` helps review the manual dirty diff before adopting it.
-- `adopt-step "title"` requires no active step, no active step chain, an initialized sync baseline, and a current branch/revision that still matches `.codex/state.md`.
+- `adopt-step "title"` requires no active step, an initialized sync baseline, and a current branch/revision that still matches `.codex/state.md`.
 - It runs the Stability Safety Gate and required project checks.
 - On success, it writes a completed report, updates history and next-step recommendation, creates one git commit, and updates `.codex/state.md` with `Last Sync Source: adopt-step:<step-id>`.
 - On check failure, it leaves the manual diff as-is and does not create completed-step metadata or a git commit.
 
-### Example 8: Run An Inline Step Chain
+### Example 8: Put Multiple Tasks In One Step
 
-Use a single-line `steps:` prompt when you want multiple tasks executed in order as one chain:
+Use one normal prompt when multiple related tasks should land as one completed step and one git commit:
 
 ```text
-steps: Add compact mode setting and persist it /-/ Cover compact mode persistence with tests
+Add compact mode setting, persist it, and cover compact mode persistence with tests.
 ```
 
-- The prompt must start with exact lowercase `steps: `.
-- Tasks are separated by the exact delimiter ` /-/ `.
-- At least two non-empty tasks are required.
-- Codex creates a checkpoint, executes tasks in order, defers intermediate commits, and creates one final git commit for the whole chain.
-- If a chain step fails checks, the chain pauses inside that active step. Continue fixing it, then run `apply`.
-- `abort-steps` cancels the active chain and restores the pre-chain checkpoint.
+- Codex creates one active step from the whole prompt.
+- `apply` completes that step as one report/history entry and one git commit.
+- If you want separate commits, send separate normal task prompts and run `apply` after each one.
 
 ### Example 9: Upgrade Codex Flow In A Project
 
@@ -500,6 +508,6 @@ resync
 
 - `update` replaces package-owned workflow files: `AGENTS.md` and `.codex/core/*`.
 - It removes obsolete package-owned core files from older starter-pack versions.
-- It may create a missing `.codex/config.toml`, but it does not overwrite an existing project config or touch `.codex/context.md`, `.codex/history.md`, `.codex/current-step.md`, `.codex/state.md`, reports, checkpoints, or tmp files.
+- It may create a missing `.codex/config.toml`, but it does not overwrite an existing project config or touch `.codex/context.md`, `.codex/history.md`, `.codex/current-step.md`, `.codex/state.md`, reports, or tmp files.
 - `update --commit` requires a clean git working tree, checks the upgraded install before committing, and creates `chore: update codex flow` only when update changes exist.
 - `resync` makes Codex Flow aware of the upgrade commit after the working tree is clean.

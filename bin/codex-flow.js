@@ -8,9 +8,22 @@ const { spawnSync } = require('node:child_process');
 const {
   COMMAND_FORMATS,
   REMOVED_COMMANDS,
+  buildCommitPlan,
+  calculateNextStepId,
+  evaluateAdoptStepGate,
+  evaluateApplyGate,
+  evaluateApplyPreflight,
+  evaluateResyncGate,
+  evaluateStartStepGate,
   extractDocumentedCommandFormats,
   extractReadmeCommandList,
-  normalizeCommandFormat
+  finalizeStep,
+  normalizeCommandFormat,
+  parseWorkflowCommand,
+  recordDecision,
+  resyncState,
+  startStep,
+  validateWorkflowState
 } = require('../lib/workflow');
 
 const packageRoot = path.resolve(__dirname, '..');
@@ -31,7 +44,6 @@ const obsoleteCoreFiles = [
 
 const requiredGitignoreEntries = [
   '.codex/state.md',
-  '.codex/checkpoints/',
   '.codex/tmp/'
 ];
 
@@ -94,7 +106,6 @@ Last Known Revision: none
 Last Known Branch: none
 Last Sync Source: none
 Strict Mode: true
-Step Chain Mode: none
 Discussion Mode: none
 `]
 ]);
@@ -108,7 +119,6 @@ const projectOwnedPaths = [
   '.codex/state.md',
   '.codex/last-report.md',
   '.codex/reports',
-  '.codex/checkpoints',
   '.codex/tmp',
   '.codex/overrides'
 ];
@@ -117,7 +127,14 @@ const packageName = '@repepto/codex-flow';
 
 async function main() {
   try {
-    const { command, options } = parseArgs(process.argv.slice(2));
+    const rawArgs = process.argv.slice(2);
+
+    if (rawArgs[0] === 'internal') {
+      runInternalCommand(parseInternalArgs(rawArgs.slice(1)));
+      return;
+    }
+
+    const { command, options } = parseArgs(rawArgs);
 
     if (command === 'help') {
       printHelp();
@@ -221,6 +238,276 @@ function parseArgs(args) {
 
   options.target = path.resolve(options.target);
   return { command, options };
+}
+
+function parseInternalArgs(args) {
+  const options = {
+    target: process.cwd(),
+    prompt: null,
+    title: null,
+    id: null,
+    description: null,
+    summary: null,
+    implementation: null,
+    message: null,
+    requireCommitWorthy: false
+  };
+  const commandArgs = [];
+
+  for (let i = 0; i < args.length; i += 1) {
+    const arg = args[i];
+
+    if (arg === '--target' || arg === '-t') {
+      const value = args[i + 1];
+      if (!value) {
+        throw new CliError(`${arg} requires a directory path.`, 2);
+      }
+      options.target = value;
+      i += 1;
+      continue;
+    }
+
+    if (arg.startsWith('--target=')) {
+      options.target = arg.slice('--target='.length);
+      if (!options.target) {
+        throw new CliError('--target requires a directory path.', 2);
+      }
+      continue;
+    }
+
+    if (arg === '--prompt') {
+      const value = args[i + 1];
+      if (value === undefined) {
+        throw new CliError('--prompt requires a value.', 2);
+      }
+      options.prompt = value;
+      i += 1;
+      continue;
+    }
+
+    if (arg.startsWith('--prompt=')) {
+      options.prompt = arg.slice('--prompt='.length);
+      continue;
+    }
+
+    if (arg === '--title') {
+      const value = args[i + 1];
+      if (value === undefined) {
+        throw new CliError('--title requires a value.', 2);
+      }
+      options.title = value;
+      i += 1;
+      continue;
+    }
+
+    if (arg.startsWith('--title=')) {
+      options.title = arg.slice('--title='.length);
+      continue;
+    }
+
+    if (arg === '--id') {
+      const value = args[i + 1];
+      if (value === undefined) {
+        throw new CliError('--id requires a value.', 2);
+      }
+      options.id = value;
+      i += 1;
+      continue;
+    }
+
+    if (arg.startsWith('--id=')) {
+      options.id = arg.slice('--id='.length);
+      continue;
+    }
+
+    if (arg === '--description') {
+      const value = args[i + 1];
+      if (value === undefined) {
+        throw new CliError('--description requires a value.', 2);
+      }
+      options.description = value;
+      i += 1;
+      continue;
+    }
+
+    if (arg.startsWith('--description=')) {
+      options.description = arg.slice('--description='.length);
+      continue;
+    }
+
+    if (arg === '--summary') {
+      const value = args[i + 1];
+      if (value === undefined) {
+        throw new CliError('--summary requires a value.', 2);
+      }
+      options.summary = value;
+      i += 1;
+      continue;
+    }
+
+    if (arg.startsWith('--summary=')) {
+      options.summary = arg.slice('--summary='.length);
+      continue;
+    }
+
+    if (arg === '--implementation') {
+      const value = args[i + 1];
+      if (value === undefined) {
+        throw new CliError('--implementation requires a value.', 2);
+      }
+      options.implementation = value;
+      i += 1;
+      continue;
+    }
+
+    if (arg.startsWith('--implementation=')) {
+      options.implementation = arg.slice('--implementation='.length);
+      continue;
+    }
+
+    if (arg === '--message') {
+      const value = args[i + 1];
+      if (value === undefined) {
+        throw new CliError('--message requires a value.', 2);
+      }
+      options.message = value;
+      i += 1;
+      continue;
+    }
+
+    if (arg.startsWith('--message=')) {
+      options.message = arg.slice('--message='.length);
+      continue;
+    }
+
+    if (arg === '--require-commit-worthy') {
+      options.requireCommitWorthy = true;
+      continue;
+    }
+
+    if (arg.startsWith('--')) {
+      throw new CliError(`Unknown internal option: ${arg}`, 2);
+    }
+
+    commandArgs.push(arg);
+  }
+
+  options.target = path.resolve(options.target);
+  return { commandArgs, options };
+}
+
+function runInternalCommand({ commandArgs, options }) {
+  const targetRoot = ensureTargetDirectory(options.target);
+  const [group, action] = commandArgs;
+  let result;
+
+  if (group === 'parse-command') {
+    if (options.prompt === null) {
+      throw new CliError('internal parse-command requires --prompt.', 2);
+    }
+    const parsed = parseWorkflowCommand(options.prompt);
+    result = {
+      ok: parsed.valid,
+      valid: parsed.valid,
+      command: parsed.command || null,
+      params: parsed.params || {},
+      reason: parsed.reason || null
+    };
+    return printInternalResult(result);
+  }
+
+  if (group === 'validate-state') {
+    return printInternalResult(validateWorkflowState(targetRoot));
+  }
+
+  if (group === 'next-step-id') {
+    result = calculateNextStepId(targetRoot);
+    return printInternalResult({
+      ok: result.ok,
+      errors: result.errors,
+      warnings: result.warnings,
+      nextStepId: result.nextStepId,
+      historyStepIds: result.historyStepIds,
+      reportStepIds: result.reportStepIds
+    });
+  }
+
+  if (group === 'commit-plan') {
+    return printInternalResult(buildCommitPlan(targetRoot, {
+      requireCommitWorthy: options.requireCommitWorthy
+    }));
+  }
+
+  if (group === 'preflight') {
+    if (action === 'apply') {
+      return printInternalResult(evaluateApplyPreflight(targetRoot));
+    }
+  }
+
+  if (group === 'state') {
+    if (action === 'resync') {
+      return printInternalResult(resyncState(targetRoot));
+    }
+
+    if (action === 'start-step') {
+      if (options.prompt === null) {
+        throw new CliError('internal state start-step requires --prompt.', 2);
+      }
+      return printInternalResult(startStep(targetRoot, options.prompt));
+    }
+
+    if (action === 'record') {
+      if (options.id === null) {
+        throw new CliError('internal state record requires --id.', 2);
+      }
+      if (options.description === null) {
+        throw new CliError('internal state record requires --description.', 2);
+      }
+      return printInternalResult(recordDecision(targetRoot, options.id, options.description));
+    }
+
+    if (action === 'finalize-step') {
+      return printInternalResult(finalizeStep(targetRoot, {
+        title: options.title,
+        summary: options.summary,
+        implementation: options.implementation,
+        message: options.message
+      }));
+    }
+  }
+
+  if (group === 'gate') {
+    if (action === 'start-step') {
+      return printInternalResult(evaluateStartStepGate(targetRoot));
+    }
+
+    if (action === 'apply') {
+      return printInternalResult(evaluateApplyGate(targetRoot));
+    }
+
+    if (action === 'adopt-step') {
+      if (options.title === null) {
+        throw new CliError('internal gate adopt-step requires --title.', 2);
+      }
+      return printInternalResult(evaluateAdoptStepGate(targetRoot, options.title));
+    }
+
+    if (action === 'resync') {
+      return printInternalResult(evaluateResyncGate(targetRoot));
+    }
+  }
+
+  throw new CliError(
+    'Unknown internal command. Supported: parse-command, validate-state, next-step-id, commit-plan, preflight apply, state resync|start-step|record|finalize-step, gate start-step|apply|adopt-step|resync.',
+    2
+  );
+}
+
+function printInternalResult(result) {
+  console.log(JSON.stringify(result, null, 2));
+  if (result.ok === false || result.valid === false) {
+    process.exitCode = 1;
+  }
 }
 
 function printHelp() {
@@ -676,7 +963,6 @@ function validateRuleAnchors(targetRoot, errors) {
     ['.codex/core/commands.md', '## apply'],
     ['.codex/core/commands.md', '## adopt-step'],
     ['.codex/core/commands.md', '## discuss'],
-    ['.codex/core/commands.md', '## Inline Multi-Step Prompts'],
     ['.codex/core/commands.md', '## resync'],
     ['.codex/core/commit-rules.md', 'One completed normal step or adopted manual step must create exactly one git commit.'],
     ['.codex/core/commit-rules.md', 'Transient Runtime Files'],

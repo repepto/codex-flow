@@ -62,7 +62,6 @@ After checks pass but before Codex writes completed-step metadata, Codex must ca
 The pre-finalization recovery snapshot must be sufficient to restore:
 
 - active `.codex/current-step.md` for a normal step;
-- active chain step and active chain metadata for an active step chain;
 - inactive `.codex/current-step.md` and the manual working-tree diff for `adopt-step`;
 - pre-finalization contents or absence of `.codex/reports/<id>.md`;
 - pre-finalization contents or absence of `.codex/last-report.md`;
@@ -91,23 +90,21 @@ Codex creates a commit only according to `.codex/core/commit-rules.md`.
 
 When a git commit is created, it must include project changes and versioned completed-step metadata.
 
-For a normal step, adopted manual step, or final step chain, completed-step metadata is commit-worthy. If no commit-worthy changes exist after excluding transient runtime state, stop and require `resync` or manual resolution.
-
-During an active step chain, per-step git commit creation is deferred. Completed-step metadata is still written for each successful chain step, but the chain creates one final git commit after all chain steps complete successfully.
+For a normal step or adopted manual step, completed-step metadata is commit-worthy. If no commit-worthy changes exist after excluding transient runtime state, stop and require `resync` or manual resolution.
 
 ## Required Commit Failure Recovery
 
-This recovery is mandatory when a normal step, adopted manual step, or final step chain requires git commit creation and that required git commit fails after completed-step metadata was written.
+This recovery is mandatory when a normal step or adopted manual step requires git commit creation and that required git commit fails after completed-step metadata was written.
 
 If required git commit creation fails after completed-step metadata was written:
 
-- the step or chain is not completed;
-- runtime sync state must not be updated as completed, as `apply:<step-id>`, or as `step-chain:<first-id>-<last-id>`;
+- the step is not completed;
+- runtime sync state must not be updated as completed or as `apply:<step-id>`;
 - for `adopt-step`, runtime sync state must not be updated as `adopt-step:<step-id>`;
 - if runtime sync state was changed during the failed finalization attempt, restore it from the pre-finalization recovery snapshot;
-- restore `.codex/current-step.md` from the pre-finalization recovery snapshot so it again contains the active current step, active chain step, or inactive pre-adoption state;
+- restore `.codex/current-step.md` from the pre-finalization recovery snapshot so it again contains the active current step or inactive pre-adoption state;
 - roll back metadata created or updated by the failed finalization attempt, including `.codex/reports/<id>.md`, `.codex/last-report.md`, `.codex/history.md`, `.codex/context.md`, `.codex/next-step.md`, and the inactive final `.codex/current-step.md`;
-- keep the same active step, active chain step, or manual working-tree diff as the only valid continuation when exact recovery succeeds.
+- keep the same active step or manual working-tree diff as the only valid continuation when exact recovery succeeds.
 
 If exact restoration is impossible, the pre-finalization recovery snapshot is missing or incomplete, or ownership of any metadata change from the failed finalization attempt is ambiguous, Codex must stop and require `resync` or manual resolution.
 
@@ -203,7 +200,7 @@ Title:
 <short title used by ls-steps>
 
 Sync:
-<git commit hash/message, or deferred to step-chain finalization>
+<git commit hash/message>
 
 Summary:
 <what the step achieved>
@@ -221,16 +218,6 @@ For an adopted manual step, `Summary` must state that `adopt-step` accepted the 
 
 External sync events may be recorded in `.codex/state.md` and the resync report. They must not be appended to `.codex/history.md` by `resync`.
 
-For a completed step inside an active step chain, record:
-
-```text
-Sync: deferred to step-chain finalization
-```
-
-A final chain report is the short user-facing report emitted after the whole step chain completes. It is not a `.codex/reports/<id>.md` completed-step report.
-
-The final chain report and runtime sync state must report the final chain commit hash. Do not rewrite completed per-step history or reports solely to embed the final chain commit hash.
-
 ## next-step.md Update Policy
 
 After every successful step, update `.codex/next-step.md`.
@@ -241,8 +228,6 @@ The next-step recommendation must be based on:
 - `.codex/history.md`;
 - current project and sync state;
 - the completed step result.
-
-If a step chain is active, the next recommended step must respect the remaining inline chain tasks stored in `.codex/state.md`.
 
 ## Reports
 

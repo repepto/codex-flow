@@ -16,10 +16,6 @@ It must include:
 - sync result, including the git commit created by the completed step;
 - next recommended step.
 
-For a completed step inside an active step chain, the sync result must be `Sync: deferred to step-chain finalization`. The final chain report must include the final chain commit hash.
-
-A final chain report is a short user-facing report for the whole step chain. It is not stored as `.codex/reports/<id>.md`.
-
 For a successful `adopt-step`, the short report must state that a manual working-tree diff was adopted.
 
 Keep it concise.
@@ -107,7 +103,6 @@ Good:
 ```text
 Implemented exact-match command parsing.
 Introduced step decision storage.
-Added auto-resume for step chains.
 ```
 
 Bad:

@@ -65,9 +65,9 @@ If `.codex/overrides/` exists, apply overrides according to `.codex/core/overrid
 
 Operational rules must live only in `AGENTS.md`, `.codex/core/`, and valid project override files under `.codex/overrides/`.
 
-Project-owned state/data files include `.codex/context.md`, `.codex/history.md`, `.codex/current-step.md`, `.codex/next-step.md`, `.codex/state.md`, `.codex/last-report.md`, `.codex/reports/*`, `.codex/checkpoints/`, and `.codex/tmp/`.
+Project-owned state/data files include `.codex/context.md`, `.codex/history.md`, `.codex/current-step.md`, `.codex/next-step.md`, `.codex/state.md`, `.codex/last-report.md`, `.codex/reports/*`, and `.codex/tmp/`.
 
-State/data files may contain current project memory, reports, checkpoints, placeholders, and active runtime state. They must not contain operational rules required for Codex behavior.
+State/data files may contain current project memory, reports, placeholders, and active runtime state. They must not contain operational rules required for Codex behavior.
 
 `.codex/config.toml` is project-owned Codex runtime configuration. Bootstrap may create it from the starter-pack defaults, but Codex must not overwrite an existing project-owned `.codex/config.toml` during bootstrap or update.
 
@@ -87,23 +87,23 @@ Before creating a new active step, Codex must pass the sync gate defined in `.co
 
 For sync-gate purposes, pre-existing project changes include staged changes, unstaged tracked-file changes, and untracked files that are not ignored by git.
 
-Pre-existing project changes block new normal steps and inline step chains. They may be converted into completed Codex step history only through the exact `adopt-step "title"` command defined in `.codex/core/commands.md`.
+Pre-existing project changes block new normal steps. They may be converted into completed Codex step history only through the exact `adopt-step "title"` command defined in `.codex/core/commands.md`.
 
 During a normal active step, before `apply`, Codex must not modify project files. Before `apply`, Codex may update `.codex/current-step.md` only to create or maintain active step state, decisions, open questions, and working notes.
 
-This normal-step pre-apply restriction does not block standalone workflow commands that are allowed to update workflow runtime state before project execution, including `strict:true`, `strict:false`, `discuss`, `discuss:close`, and `resync`, or inline step-chain checkpoint metadata created before chain execution. These actions must still follow their command-specific rules and must not modify project code unless their rules explicitly allow it.
+This normal-step pre-apply restriction does not block standalone workflow commands that are allowed to update workflow runtime state before project execution, including `strict:true`, `strict:false`, `discuss`, `discuss:close`, and `resync`. These actions must still follow their command-specific rules and must not modify project code unless their rules explicitly allow it.
 
 `apply` is the normal execution command. It must follow `.codex/core/commands.md`, `.codex/core/commit-rules.md`, `.codex/core/after-step.md`, and `.codex/core/step-report-rules.md`.
 
 `adopt-step "title"` is the manual-diff adoption command. It must follow `.codex/core/commands.md`, `.codex/core/commit-rules.md`, `.codex/core/after-step.md`, and `.codex/core/step-report-rules.md`.
 
-Git is the base sync backend. If git state, `.codex` memory, reports, history, or checkpoint state is inconsistent or ambiguous, Codex must stop and require `resync`.
+Git is the base sync backend. If git state, `.codex` memory, reports, history, or runtime state is inconsistent or ambiguous, Codex must stop and require `resync`.
 
 `resync` may initialize or advance the sync baseline only when the git working tree is clean and workflow state is unambiguous.
 
 ## Safety
 
-Codex must not perform destructive git operations except when executing `abort-steps`, and only to restore the checkpoint created before an inline step chain.
+Codex must not perform destructive git operations.
 
 If state is ambiguous, Codex must stop instead of guessing.
 
