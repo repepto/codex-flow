@@ -71,7 +71,7 @@ A project may override this format through `.codex/overrides/commit-rules.md`.
 
 ## Verification
 
-`apply` and `adopt-step` must run the required project checks before git commit creation.
+`apply` and `adopt-step` must run the required project checks before completed-step metadata is written and before git commit creation.
 
 Required project checks are discovered from:
 
@@ -80,6 +80,19 @@ Required project checks are discovered from:
 - package/build configuration;
 - scripts or commands conventionally named `test`, `lint`, `typecheck`, `check`, or equivalent for the detected stack;
 - language or framework configuration files that define verification commands.
+
+When an internal finalization helper is available, including `finalize-step` or `finalize-adopt-step`, it must discover and run configured checks from supported project configuration before writing completed-step metadata. Codex may provide additional explicit check commands to the helper for stacks or project conventions that cannot be discovered mechanically.
+
+Required checks must run with a finite timeout so a hung test, linter, typechecker, or custom verification command cannot block `apply` or `adopt-step` forever.
+
+The default required-check timeout is 10 minutes per command. Implementations may allow project runtime configuration or environment variables to extend or reduce this timeout, but they must not run required checks without any timeout.
+
+If a required check times out, Codex must treat it as a check failure:
+
+- no git commit is created;
+- no completed-step metadata is created;
+- history is not updated;
+- the active normal step or manual adoption diff remains available for correction or retry.
 
 If no configured checks are found, this is not a check failure. Codex must report:
 
@@ -94,6 +107,9 @@ If configured checks exist but cannot be run because tools, dependencies, or con
 If checks fail during `apply`:
 
 - no git commit is created;
+- no completed-step metadata is created;
+- history is not updated;
+- `.codex/current-step.md` remains active;
 - the step remains active;
 - Codex reports the failure;
 - the user continues within the same step.
@@ -238,12 +254,14 @@ Normal `apply` must follow this order:
 
 1. verify the git sync baseline;
 2. apply project changes;
-3. run required checks;
-4. capture a pre-finalization recovery snapshot;
-5. prepare and write completed-step metadata;
-6. create one git commit;
-7. update runtime sync state in `.codex/state.md`;
-8. complete the step.
+3. verify that at least one commit-worthy payload change exists before completed-step metadata is written;
+4. run the Stability Safety Gate against any stability-sensitive payload diff;
+5. run required checks against the current working tree;
+6. capture a pre-finalization recovery snapshot;
+7. prepare and write completed-step metadata;
+8. create one git commit;
+9. update runtime sync state in `.codex/state.md`;
+10. complete the step.
 
 Versioned metadata must not require embedding the new commit's own hash, because a commit cannot contain its own final hash. Runtime sync state may record the final hash after the commit.
 
@@ -256,12 +274,15 @@ If metadata verification fails after git commit creation, Codex state is inconsi
 1. verify that no active step exists;
 2. verify the git sync baseline and current branch still match `.codex/state.md`;
 3. inspect the manual working-tree diff and exclude transient runtime state from commit-worthy payload;
-4. run the Stability Safety Gate against the manual diff;
-5. run required checks against the current working tree;
-6. capture a pre-finalization recovery snapshot;
-7. prepare and write completed-step metadata for an adopted manual step;
-8. create one git commit;
-9. update runtime sync state in `.codex/state.md`;
-10. complete the adopted step.
+4. reject pre-existing manual changes in versioned Codex memory/config files that are owned by adopted-step finalization;
+5. run the Stability Safety Gate against the manual diff;
+6. run required checks against the current working tree;
+7. capture a pre-finalization recovery snapshot;
+8. prepare and write completed-step metadata for an adopted manual step;
+9. create one git commit;
+10. update runtime sync state in `.codex/state.md`;
+11. complete the adopted step.
+
+When `codex-flow internal state finalize-adopt-step --title <title>` is available, Codex must use it for adopted-step metadata, commit creation, runtime sync update, and commit-failure recovery instead of manually editing those files.
 
 If required git commit creation fails after adopted-step metadata was written, Codex must run Required Commit Failure Recovery from `.codex/core/after-step.md`. If exact recovery succeeds, the manual working-tree diff remains the only valid payload for a later `adopt-step` retry. Otherwise Codex must stop and require `resync` or manual resolution.

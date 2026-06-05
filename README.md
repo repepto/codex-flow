@@ -73,7 +73,7 @@ They cover:
 - `apply` preflight validation for active step id, base revision, base branch, and discussion-mode blockers;
 - commit-plan validation that excludes transient runtime state and blocks active `.codex/current-step.md` from commit scope;
 - `resync` clean-tree gate evaluation;
-- `adopt-step` dirty-diff gate evaluation;
+- `adopt-step` dirty-diff gate evaluation, including rejection of pre-existing manual changes in versioned `.codex` memory/config files;
 - uninitialized sync-baseline diagnostics that do not report revision or branch mismatches until the baseline exists.
 
 `doctor` uses these helpers for package/install invariants. The CLI also exposes hidden JSON guardrails for Codex automation:
@@ -88,10 +88,12 @@ codex-flow internal state resync
 codex-flow internal state start-step --prompt 'Add compact mode'
 codex-flow internal state record --id compact-mode --description 'Store the preference locally.'
 codex-flow internal state finalize-step --title 'Add compact mode'
+codex-flow internal state finalize-adopt-step --title 'Adopt manual diff'
 codex-flow internal gate start-step
 codex-flow internal gate apply
 codex-flow internal gate adopt-step --title 'Adopt manual diff'
 codex-flow internal gate resync
+codex-flow internal gate stability
 ```
 
 These `internal` CLI helpers are not chat workflow commands and are intentionally omitted from the user command list. They let Codex ask the CLI for binary preflight answers without changing the prompts users send in chat.
@@ -165,7 +167,7 @@ record:<id> "description"
 apply
 ```
 
-`apply` performs the work, runs checks, writes reports/history, updates `.codex/current-step.md`, and creates a git commit.
+`apply` performs the work, requires real commit-worthy payload before final metadata, runs checks, writes reports/history, updates `.codex/current-step.md`, and creates a git commit.
 
 For multiple related tasks that should land in one commit, describe them in one normal prompt. Codex treats the whole prompt as one active step.
 
@@ -204,7 +206,7 @@ Use `help` at any point for state-aware guidance. It is read-only and explains w
 - After a normal prompt creates an active step, Codex reports the step id, changed workflow state, confirms project files were not modified, and lists expected project-file scope when it can infer one. It must not use a generic "waiting for apply" message.
 - Use `discuss` to enter consultation mode before choosing a step. While discussion mode is active, normal prompts do not create steps, edit the main workspace, or create commits. Codex may run diagnostics and may perform mutating experiments only in a disposable scratch workspace such as a temp copy, temporary git worktree, or ignored `.codex/tmp/discuss-*` path. Close it with `discuss:close` before starting executable work.
 - If the git tree has staged, unstaged, or untracked non-ignored changes before a new step, Codex stops. Clean it manually, then run `resync`.
-- To intentionally accept manual staged, unstaged, or untracked non-ignored changes as one completed flow step, run `adopt-step "title"` while no step is active.
+- To intentionally accept manual staged, unstaged, or untracked non-ignored project changes as one completed flow step, run `adopt-step "title"` while no step is active. `adopt-step` does not accept pre-existing manual changes in versioned `.codex` memory/config files; those files are written by finalization after gates and checks pass.
 - `check` is a read-only review of the current local diff relative to `HEAD`; it can run on a dirty tree and excludes unrelated baseline issues.
 - `check:deep` is a read-only whole-project review; it can run on a dirty tree and reports project-wide risks, problems, and recommendations.
 - `resync` initializes or advances the sync baseline only when the git tree has no staged, unstaged, or untracked non-ignored changes and workflow state is unambiguous.
@@ -430,7 +432,7 @@ apply
 - The normal prompt creates an active step when the sync gate passes.
 - The step-start response reports `.codex/current-step.md` as the only changed file before `apply`, confirms project files are unchanged, and names expected project-file scope when inferable.
 - `record:<id> "decision"` stores a step decision in `.codex/current-step.md`; it does not edit project code.
-- `apply` performs the work, runs required checks, writes reports/history, updates `.codex/current-step.md`, creates one git commit, and updates runtime sync state.
+- `apply` performs the work, requires at least one commit-worthy payload change before completed-step metadata, runs required checks, writes reports/history, updates `.codex/current-step.md`, creates one git commit, and updates runtime sync state.
 
 After success:
 
@@ -476,8 +478,8 @@ adopt-step "Update compact mode manually"
 
 - `check` helps review the manual dirty diff before adopting it.
 - `adopt-step "title"` requires no active step, an initialized sync baseline, and a current branch/revision that still matches `.codex/state.md`.
-- It runs the Stability Safety Gate and required project checks.
-- On success, it writes a completed report, updates history and next-step recommendation, creates one git commit, and updates `.codex/state.md` with `Last Sync Source: adopt-step:<step-id>`.
+- It rejects pre-existing manual changes in versioned `.codex` memory/config files, then runs the Stability Safety Gate and required project checks before writing completed-step metadata.
+- On success, the internal `finalize-adopt-step` helper writes a completed report, updates history and next-step recommendation, creates one git commit, and updates `.codex/state.md` with `Last Sync Source: adopt-step:<step-id>`.
 - On check failure, it leaves the manual diff as-is and does not create completed-step metadata or a git commit.
 
 ### Example 8: Put Multiple Tasks In One Step

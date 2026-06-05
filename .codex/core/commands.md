@@ -26,15 +26,17 @@ codex-flow internal state resync
 codex-flow internal state start-step --prompt <prompt>
 codex-flow internal state record --id <id> --description <description>
 codex-flow internal state finalize-step
+codex-flow internal state finalize-adopt-step --title <title>
 codex-flow internal gate start-step
 codex-flow internal gate apply
 codex-flow internal gate adopt-step --title <title>
 codex-flow internal gate resync
+codex-flow internal gate stability
 ```
 
 These internal helpers are not Codex chat workflow commands. A user prompt that says `codex-flow internal ...` or `internal ...` is not a workflow command unless it is an ordinary user request to run a terminal command.
 
-When the matching `codex-flow internal` helper is available in the environment, Codex must prefer it for binary workflow invariants before making state-changing decisions, including command parsing, sync gates, apply preflight, adopt-step preflight, resync clean-tree gates, next step id calculation, workflow state validation, normal-flow state transitions, and commit-scope planning.
+When the matching `codex-flow internal` helper is available in the environment, Codex must prefer it for binary workflow invariants before making state-changing decisions, including command parsing, sync gates, apply preflight, adopt-step preflight and finalization, stability-sensitive diff checks, resync clean-tree gates, next step id calculation, workflow state validation, normal-flow state transitions, and commit-scope planning.
 
 If an internal helper is unavailable or cannot run, Codex must fall back to the rule files in `AGENTS.md` and `.codex/core/`, state that the machine helper was unavailable when that matters to the decision, and stop rather than guessing when the rule-file-only result is ambiguous.
 
@@ -127,6 +129,10 @@ Safe reformulation should preserve required stability content. For example, a re
 .codex/state.md
 .codex/tmp/
 ```
+
+When the internal helper `codex-flow internal gate stability` is available, Codex must run it before applying or adopting a diff that touches stability-sensitive workflow files. The helper is a minimum machine guardrail, not a complete semantic proof. A passing helper result does not allow Codex to ignore the textual Stability Safety Gate, but a failing helper result must block the state-changing command until the diff is fixed or the ambiguity is resolved.
+
+The machine stability gate must at minimum reject workflow diffs that remove required rule anchors, corrupt the documented command surface, remove required `.gitignore` runtime entries, introduce unsupported override files, or use unsupported override replacement markers.
 
 ## Normal Prompt Behavior
 
@@ -374,6 +380,8 @@ Behavior:
 
 - requires an active step;
 - applies the current step according to the task, recorded decisions, and working notes;
+- must produce at least one commit-worthy payload change before completed-step metadata is written;
+- must not complete as a metadata-only step;
 - runs required project checks;
 - if checks fail, stops and keeps the same step active;
 - if checks pass, runs the after-step process;
@@ -412,6 +420,7 @@ Behavior:
 - requires at least one commit-worthy manual change after excluding transient runtime state;
 - must not treat transient runtime files as commit-worthy payload;
 - must not commit transient runtime files;
+- must not adopt pre-existing manual changes in versioned Codex memory/config files; those files may be changed only by the adopted-step finalization process after gates and checks pass;
 - must run the Stability Safety Gate against the manual diff before running checks or writing completed-step metadata;
 - must run required project checks against the current working tree;
 - if checks fail, stops without creating completed-step metadata, without updating history, without clearing or creating an active step, and without creating a git commit;
@@ -428,6 +437,18 @@ Transient runtime files are:
 ```text
 .codex/state.md
 .codex/tmp/**
+```
+
+Versioned Codex memory/config files protected from pre-existing manual adoption are:
+
+```text
+.codex/config.toml
+.codex/context.md
+.codex/history.md
+.codex/current-step.md
+.codex/next-step.md
+.codex/last-report.md
+.codex/reports/*
 ```
 
 If no active step exists but the current git revision or branch does not match `.codex/state.md`, Codex must stop and require `resync` or manual resolution before adoption.

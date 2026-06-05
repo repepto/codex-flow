@@ -57,7 +57,7 @@ For normal `apply`, the active step `Step ID` in `.codex/current-step.md` must m
 
 ## Pre-finalization Phase
 
-After checks pass but before Codex writes completed-step metadata, Codex must capture a pre-finalization recovery snapshot.
+After payload existence, stability, and required checks pass but before Codex writes completed-step metadata, Codex must capture a pre-finalization recovery snapshot.
 
 The pre-finalization recovery snapshot must be sufficient to restore:
 

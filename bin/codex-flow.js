@@ -15,8 +15,10 @@ const {
   evaluateApplyPreflight,
   evaluateResyncGate,
   evaluateStartStepGate,
+  evaluateStabilitySafetyGate,
   extractDocumentedCommandFormats,
   extractReadmeCommandList,
+  finalizeAdoptStep,
   finalizeStep,
   normalizeCommandFormat,
   parseWorkflowCommand,
@@ -250,6 +252,7 @@ function parseInternalArgs(args) {
     summary: null,
     implementation: null,
     message: null,
+    checkCommands: [],
     requireCommitWorthy: false
   };
   const commandArgs = [];
@@ -380,6 +383,21 @@ function parseInternalArgs(args) {
       continue;
     }
 
+    if (arg === '--check-command') {
+      const value = args[i + 1];
+      if (value === undefined) {
+        throw new CliError('--check-command requires a value.', 2);
+      }
+      options.checkCommands.push(value);
+      i += 1;
+      continue;
+    }
+
+    if (arg.startsWith('--check-command=')) {
+      options.checkCommands.push(arg.slice('--check-command='.length));
+      continue;
+    }
+
     if (arg === '--require-commit-worthy') {
       options.requireCommitWorthy = true;
       continue;
@@ -471,7 +489,21 @@ function runInternalCommand({ commandArgs, options }) {
         title: options.title,
         summary: options.summary,
         implementation: options.implementation,
-        message: options.message
+        message: options.message,
+        checkCommands: options.checkCommands
+      }));
+    }
+
+    if (action === 'finalize-adopt-step') {
+      if (options.title === null) {
+        throw new CliError('internal state finalize-adopt-step requires --title.', 2);
+      }
+      return printInternalResult(finalizeAdoptStep(targetRoot, {
+        title: options.title,
+        summary: options.summary,
+        implementation: options.implementation,
+        message: options.message,
+        checkCommands: options.checkCommands
       }));
     }
   }
@@ -489,16 +521,22 @@ function runInternalCommand({ commandArgs, options }) {
       if (options.title === null) {
         throw new CliError('internal gate adopt-step requires --title.', 2);
       }
-      return printInternalResult(evaluateAdoptStepGate(targetRoot, options.title));
+      return printInternalResult(evaluateAdoptStepGate(targetRoot, options.title, {
+        checkCommands: options.checkCommands
+      }));
     }
 
     if (action === 'resync') {
       return printInternalResult(evaluateResyncGate(targetRoot));
     }
+
+    if (action === 'stability') {
+      return printInternalResult(evaluateStabilitySafetyGate(targetRoot));
+    }
   }
 
   throw new CliError(
-    'Unknown internal command. Supported: parse-command, validate-state, next-step-id, commit-plan, preflight apply, state resync|start-step|record|finalize-step, gate start-step|apply|adopt-step|resync.',
+    'Unknown internal command. Supported: parse-command, validate-state, next-step-id, commit-plan, preflight apply, state resync|start-step|record|finalize-step|finalize-adopt-step, gate start-step|apply|adopt-step|resync|stability.',
     2
   );
 }

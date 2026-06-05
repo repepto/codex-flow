@@ -7,6 +7,29 @@ const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 const test = require('node:test');
 
+const configuredCommandTimeoutMs = Number(process.env.CODEX_FLOW_TEST_COMMAND_TIMEOUT_MS || 30_000);
+const TEST_COMMAND_TIMEOUT_MS = Number.isFinite(configuredCommandTimeoutMs) && configuredCommandTimeoutMs > 0
+  ? configuredCommandTimeoutMs
+  : 30_000;
+const createdTempDirs = [];
+const testHome = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-flow-test-home-'));
+const testGitTemplate = path.join(testHome, 'git-template');
+const testXdgConfig = path.join(testHome, 'xdg-config');
+
+createdTempDirs.push(testHome);
+fs.mkdirSync(path.join(testGitTemplate, 'hooks'), { recursive: true });
+fs.mkdirSync(testXdgConfig, { recursive: true });
+
+Object.assign(process.env, {
+  GIT_CONFIG_NOSYSTEM: '1',
+  GIT_CONFIG_GLOBAL: os.devNull,
+  GIT_TERMINAL_PROMPT: '0',
+  GIT_ASKPASS: 'echo',
+  GIT_TEMPLATE_DIR: testGitTemplate,
+  HOME: testHome,
+  XDG_CONFIG_HOME: testXdgConfig
+});
+
 const {
   buildCommitPlan,
   calculateNextStepId,
@@ -18,8 +41,10 @@ const {
   evaluateNormalStepGate,
   evaluateResyncGate,
   evaluateStartStepGate,
+  evaluateStabilitySafetyGate,
   extractDocumentedCommandFormats,
   extractReadmeCommandList,
+  finalizeAdoptStep,
   finalizeStep,
   normalizeCommandFormat,
   parseWorkflowCommand,
@@ -103,6 +128,13 @@ test('steps prompts are no longer special workflow commands', () => {
 
   assert.equal(parsed.valid, false);
   assert.match(parsed.reason, /does not exactly match/);
+});
+
+test('test command helper fails fast when a subprocess exceeds its timeout', () => {
+  assert.throws(
+    () => run(process.execPath, ['-e', 'setTimeout(() => {}, 1000)'], { timeout: 100 }),
+    /Command failed while running tests:.*timeout_ms: 100.*ETIMEDOUT/s
+  );
 });
 
 test('init cancellation in non-git targets exits non-zero and leaves target unchanged', () => {
@@ -445,6 +477,275 @@ test('internal normal flow runs resync, task, record, apply finalization, report
   assert.equal(run('git', ['log', '-1', '--format=%s'], { cwd: target }).stdout.trim(), 'chore: add hello file');
 });
 
+test('internal finalize-step rejects metadata-only apply completion', () => {
+  const target = makeTempDir('codex-flow-metadata-only-');
+  initGit(target);
+  assert.equal(runCli(['init', '--target', target]).status, 0);
+  commitVersionedInstall(target);
+  assert.equal(runCli(['internal', 'state', 'resync', '--target', target]).status, 0);
+  assert.equal(runCli(['internal', 'state', 'start-step', '--prompt', 'Do nothing', '--target', target]).status, 0);
+
+  const result = runCli([
+    'internal',
+    'state',
+    'finalize-step',
+    '--title',
+    'Do nothing',
+    '--target',
+    target
+  ]);
+
+  assert.equal(result.status, 1);
+  assert.match(JSON.parse(result.stdout).errors.join('\n'), /metadata-only step completion/);
+  assert.equal(fs.existsSync(path.join(target, '.codex/reports/1.md')), false);
+  assert.match(fs.readFileSync(path.join(target, '.codex/current-step.md'), 'utf8'), /Status: active/);
+  assert.doesNotMatch(fs.readFileSync(path.join(target, '.codex/history.md'), 'utf8'), /## Step 1/);
+  assert.equal(run('git', ['log', '-1', '--format=%s'], { cwd: target }).stdout.trim(), 'chore: install codex flow');
+});
+
+test('internal finalize-step runs discovered checks before completed metadata', () => {
+  const target = makeTempDir('codex-flow-checks-');
+  initGit(target);
+  assert.equal(runCli(['init', '--target', target]).status, 0);
+  commitVersionedInstall(target);
+  assert.equal(runCli(['internal', 'state', 'resync', '--target', target]).status, 0);
+  assert.equal(runCli(['internal', 'state', 'start-step', '--prompt', 'Add failing package check', '--target', target]).status, 0);
+  fs.writeFileSync(path.join(target, 'package.json'), JSON.stringify({
+    scripts: {
+      test: 'node -e "process.exit(1)"'
+    }
+  }, null, 2), 'utf8');
+
+  const result = runCli([
+    'internal',
+    'state',
+    'finalize-step',
+    '--title',
+    'Add failing package check',
+    '--target',
+    target
+  ]);
+
+  assert.equal(result.status, 1);
+  assert.match(JSON.parse(result.stdout).errors.join('\n'), /Required check failed: npm test/);
+  assert.equal(fs.existsSync(path.join(target, '.codex/reports/1.md')), false);
+  assert.match(fs.readFileSync(path.join(target, '.codex/current-step.md'), 'utf8'), /Status: active/);
+  assert.doesNotMatch(fs.readFileSync(path.join(target, '.codex/history.md'), 'utf8'), /## Step 1/);
+  assert.equal(run('git', ['log', '-1', '--format=%s'], { cwd: target }).stdout.trim(), 'chore: install codex flow');
+});
+
+test('internal finalize-step times out hung required checks before completed metadata', () => {
+  const target = makeTempDir('codex-flow-check-timeout-');
+  initGit(target);
+  assert.equal(runCli(['init', '--target', target]).status, 0);
+  commitVersionedInstall(target);
+  assert.equal(runCli(['internal', 'state', 'resync', '--target', target]).status, 0);
+  assert.equal(runCli(['internal', 'state', 'start-step', '--prompt', 'Add file with hung check', '--target', target]).status, 0);
+  fs.writeFileSync(path.join(target, 'payload.txt'), 'payload\n', 'utf8');
+
+  const result = finalizeStep(target, {
+    title: 'Add file with hung check',
+    checkCommands: ['while :; do :; done'],
+    checkTimeoutMs: 100
+  });
+
+  assert.equal(result.ok, false);
+  assert.match(result.errors.join('\n'), /Required check timed out after 100 ms: while :; do :; done/);
+  assert.equal(fs.existsSync(path.join(target, '.codex/reports/1.md')), false);
+  assert.match(fs.readFileSync(path.join(target, '.codex/current-step.md'), 'utf8'), /Status: active/);
+  assert.doesNotMatch(fs.readFileSync(path.join(target, '.codex/history.md'), 'utf8'), /## Step 1/);
+  assert.equal(run('git', ['log', '-1', '--format=%s'], { cwd: target }).stdout.trim(), 'chore: install codex flow');
+});
+
+test('stability gate rejects workflow diffs that weaken machine-checkable invariants', () => {
+  const target = makeTempDir('codex-flow-stability-gate-');
+  initGit(target);
+  assert.equal(runCli(['init', '--target', target]).status, 0);
+  commitVersionedInstall(target);
+  writeInitializedState(target);
+
+  fs.writeFileSync(path.join(target, '.gitignore'), '.DS_Store\n', 'utf8');
+  let gate = evaluateStabilitySafetyGate(target);
+  assert.equal(gate.ok, false);
+  assert.match(gate.errors.join('\n'), /\.gitignore is missing required runtime ignore: \.codex\/state\.md/);
+  assert.equal(evaluateAdoptStepGate(target, 'Adopt unsafe workflow diff').ok, false);
+
+  fs.writeFileSync(path.join(target, '.gitignore'), '.codex/state.md\n.codex/tmp/\n', 'utf8');
+  const commandsPath = path.join(target, '.codex/core/commands.md');
+  fs.writeFileSync(
+    commandsPath,
+    fs.readFileSync(commandsPath, 'utf8').replace('## Stability Safety Gate', '## Safety Gate'),
+    'utf8'
+  );
+  gate = evaluateStabilitySafetyGate(target);
+  assert.equal(gate.ok, false);
+  assert.match(gate.errors.join('\n'), /missing invariant anchor: ## Stability Safety Gate/);
+});
+
+test('adopt-step gate rejects pre-existing versioned codex memory changes', () => {
+  const target = makeTempDir('codex-flow-adopt-memory-');
+  initGit(target);
+  assert.equal(runCli(['init', '--target', target]).status, 0);
+  commitVersionedInstall(target);
+  writeInitializedState(target);
+
+  fs.appendFileSync(path.join(target, '.codex/history.md'), '\nBROKEN manual history edit\n', 'utf8');
+  fs.writeFileSync(path.join(target, '.codex/reports/99.md'), '# Manual report corruption\n', 'utf8');
+  fs.writeFileSync(path.join(target, 'manual.txt'), 'manual project change\n', 'utf8');
+
+  const gate = evaluateAdoptStepGate(target, 'Adopt manual project change');
+  assert.equal(gate.ok, false);
+  assert.match(gate.errors.join('\n'), /cannot adopt pre-existing changes in versioned Codex memory\/config/);
+  assert.deepEqual(
+    gate.details.protectedCodexMemoryChanges.map((change) => change.path).sort(),
+    ['.codex/history.md', '.codex/reports/']
+  );
+  assert.equal(fs.existsSync(path.join(target, '.codex/reports/1.md')), false);
+  assert.doesNotMatch(fs.readFileSync(path.join(target, '.codex/history.md'), 'utf8'), /## Step 1/);
+});
+
+test('adopt-step gate runs discovered checks against the manual diff', () => {
+  const target = makeTempDir('codex-flow-adopt-checks-');
+  initGit(target);
+  assert.equal(runCli(['init', '--target', target]).status, 0);
+  commitVersionedInstall(target);
+  writeInitializedState(target);
+  fs.writeFileSync(path.join(target, 'package.json'), JSON.stringify({
+    scripts: {
+      test: 'node -e "process.exit(1)"'
+    }
+  }, null, 2), 'utf8');
+
+  const gate = evaluateAdoptStepGate(target, 'Adopt failing package check');
+  assert.equal(gate.ok, false);
+  assert.match(gate.errors.join('\n'), /Required check failed: npm test/);
+  assert.equal(fs.existsSync(path.join(target, '.codex/reports/1.md')), false);
+  assert.doesNotMatch(fs.readFileSync(path.join(target, '.codex/history.md'), 'utf8'), /## Step 1/);
+  assert.equal(run('git', ['log', '-1', '--format=%s'], { cwd: target }).stdout.trim(), 'chore: install codex flow');
+});
+
+test('internal finalize-adopt-step adopts manual diff, metadata, commit, and state', () => {
+  const target = makeTempDir('codex-flow-adopt-finalize-');
+  initGit(target);
+  assert.equal(runCli(['init', '--target', target]).status, 0);
+  commitVersionedInstall(target);
+  assert.equal(runCli(['internal', 'state', 'resync', '--target', target]).status, 0);
+  fs.writeFileSync(path.join(target, 'manual.txt'), 'manual\n', 'utf8');
+
+  const result = runCli([
+    'internal',
+    'state',
+    'finalize-adopt-step',
+    '--title',
+    'Adopt manual file',
+    '--message',
+    'chore: adopt manual file',
+    '--target',
+    target
+  ]);
+
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  const finalization = JSON.parse(result.stdout);
+  assert.equal(finalization.details.stepId, 1);
+  assert.match(finalization.details.commit, /^[a-f0-9]{40}$/);
+  assert.equal(fs.existsSync(path.join(target, '.codex/reports/1.md')), true);
+  assert.match(fs.readFileSync(path.join(target, '.codex/reports/1.md'), 'utf8'), /manual working-tree diff/);
+  assert.match(fs.readFileSync(path.join(target, '.codex/history.md'), 'utf8'), /adopt-step accepted the user's manual working-tree diff/);
+  assert.match(fs.readFileSync(path.join(target, '.codex/current-step.md'), 'utf8'), /No active step/);
+  assert.match(fs.readFileSync(path.join(target, '.codex/state.md'), 'utf8'), /Last Sync Source: adopt-step:1/);
+  assert.equal(run('git', ['status', '--short'], { cwd: target }).stdout.trim(), '');
+  assert.equal(run('git', ['log', '-1', '--format=%s'], { cwd: target }).stdout.trim(), 'chore: adopt manual file');
+  assert.match(run('git', ['show', '--name-only', '--format=', 'HEAD'], { cwd: target }).stdout, /manual\.txt/);
+});
+
+test('internal finalize-adopt-step times out hung required checks before completed metadata', () => {
+  const target = makeTempDir('codex-flow-adopt-timeout-');
+  initGit(target);
+  assert.equal(runCli(['init', '--target', target]).status, 0);
+  commitVersionedInstall(target);
+  assert.equal(runCli(['internal', 'state', 'resync', '--target', target]).status, 0);
+  fs.writeFileSync(path.join(target, 'manual.txt'), 'manual\n', 'utf8');
+
+  const result = finalizeAdoptStep(target, {
+    title: 'Adopt manual file with hung check',
+    checkCommands: ['while :; do :; done'],
+    checkTimeoutMs: 100
+  });
+
+  assert.equal(result.ok, false);
+  assert.match(result.errors.join('\n'), /Required check timed out after 100 ms: while :; do :; done/);
+  assert.equal(fs.existsSync(path.join(target, '.codex/reports/1.md')), false);
+  assert.match(fs.readFileSync(path.join(target, '.codex/current-step.md'), 'utf8'), /No active step/);
+  assert.doesNotMatch(fs.readFileSync(path.join(target, '.codex/history.md'), 'utf8'), /## Step 1/);
+  assert.equal(run('git', ['log', '-1', '--format=%s'], { cwd: target }).stdout.trim(), 'chore: install codex flow');
+  assert.match(run('git', ['status', '--short'], { cwd: target }).stdout, /manual\.txt/);
+});
+
+test('internal finalize-adopt-step stops on check failure before completed metadata', () => {
+  const target = makeTempDir('codex-flow-adopt-finalize-checks-');
+  initGit(target);
+  assert.equal(runCli(['init', '--target', target]).status, 0);
+  commitVersionedInstall(target);
+  assert.equal(runCli(['internal', 'state', 'resync', '--target', target]).status, 0);
+  fs.writeFileSync(path.join(target, 'package.json'), JSON.stringify({
+    scripts: {
+      test: 'node -e "process.exit(1)"'
+    }
+  }, null, 2), 'utf8');
+
+  const result = runCli([
+    'internal',
+    'state',
+    'finalize-adopt-step',
+    '--title',
+    'Adopt failing package check',
+    '--target',
+    target
+  ]);
+
+  assert.equal(result.status, 1);
+  assert.match(JSON.parse(result.stdout).errors.join('\n'), /Required check failed: npm test/);
+  assert.equal(fs.existsSync(path.join(target, '.codex/reports/1.md')), false);
+  assert.match(fs.readFileSync(path.join(target, '.codex/current-step.md'), 'utf8'), /No active step/);
+  assert.doesNotMatch(fs.readFileSync(path.join(target, '.codex/history.md'), 'utf8'), /## Step 1/);
+  assert.equal(run('git', ['log', '-1', '--format=%s'], { cwd: target }).stdout.trim(), 'chore: install codex flow');
+  assert.match(run('git', ['status', '--short'], { cwd: target }).stdout, /package\.json/);
+});
+
+test('internal finalize-adopt-step restores pre-adoption metadata when commit creation fails', () => {
+  const target = makeTempDir('codex-flow-adopt-finalize-failure-');
+  initGit(target);
+  assert.equal(runCli(['init', '--target', target]).status, 0);
+  commitVersionedInstall(target);
+  assert.equal(runCli(['internal', 'state', 'resync', '--target', target]).status, 0);
+  fs.writeFileSync(path.join(target, 'blocked.txt'), 'blocked\n', 'utf8');
+
+  const hookPath = path.join(target, '.git/hooks/pre-commit');
+  fs.writeFileSync(hookPath, '#!/bin/sh\nexit 1\n', 'utf8');
+  fs.chmodSync(hookPath, 0o755);
+
+  const result = runCli([
+    'internal',
+    'state',
+    'finalize-adopt-step',
+    '--title',
+    'Adopt blocked file',
+    '--message',
+    'chore: adopt blocked file',
+    '--target',
+    target
+  ]);
+
+  assert.equal(result.status, 1);
+  assert.match(JSON.parse(result.stdout).errors.join('\n'), /git commit failed/);
+  assert.equal(fs.existsSync(path.join(target, '.codex/reports/1.md')), false);
+  assert.match(fs.readFileSync(path.join(target, '.codex/current-step.md'), 'utf8'), /Last completed step: none/);
+  assert.doesNotMatch(fs.readFileSync(path.join(target, '.codex/history.md'), 'utf8'), /## Step 1/);
+  assert.doesNotMatch(fs.readFileSync(path.join(target, '.codex/state.md'), 'utf8'), /Last Sync Source: adopt-step:1/);
+  assert.equal(run('git', ['log', '-1', '--format=%s'], { cwd: target }).stdout.trim(), 'chore: install codex flow');
+  assert.match(run('git', ['status', '--short'], { cwd: target }).stdout, /blocked\.txt/);
+});
+
 test('internal finalize-step restores active state when commit creation fails', () => {
   const target = makeTempDir('codex-flow-finalize-failure-');
   initGit(target);
@@ -480,7 +781,9 @@ test('internal finalize-step restores active state when commit creation fails', 
 });
 
 function makeTempDir(prefix) {
-  return fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+  const target = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+  createdTempDirs.push(target);
+  return target;
 }
 
 function runCli(args, options = {}) {
@@ -491,12 +794,38 @@ function runCli(args, options = {}) {
 }
 
 function run(command, args, options = {}) {
-  return spawnSync(command, args, {
-    cwd: options.cwd || packageRoot,
+  const cwd = options.cwd || packageRoot;
+  const result = spawnSync(command, args, {
+    cwd,
     encoding: 'utf8',
-    input: options.input
+    input: options.input,
+    timeout: options.timeout || TEST_COMMAND_TIMEOUT_MS
   });
+
+  if (result.error) {
+    const commandLine = [command, ...args].join(' ');
+    const detail = [
+      `Command failed while running tests: ${commandLine}`,
+      `cwd: ${cwd}`,
+      `timeout_ms: ${options.timeout || TEST_COMMAND_TIMEOUT_MS}`,
+      `error: ${result.error.message}`,
+      result.stdout ? `stdout:\n${result.stdout}` : '',
+      result.stderr ? `stderr:\n${result.stderr}` : ''
+    ].filter(Boolean).join('\n');
+    throw new Error(detail);
+  }
+
+  return result;
 }
+
+process.once('exit', () => {
+  for (const target of createdTempDirs.reverse()) {
+    fs.rmSync(target, {
+      recursive: true,
+      force: true
+    });
+  }
+});
 
 function initGit(target) {
   assert.equal(run('git', ['init', '-q'], { cwd: target }).status, 0);
