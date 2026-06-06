@@ -294,6 +294,8 @@ Before proposing solutions, plans, tasks, or implementation approaches, Codex mu
 
 If `.codex/goal.md` already exists, `goal:<description>` replaces the previous goal. Only one active goal exists.
 
+If `.codex/goal.md` already contains the same normalized goal text, `goal:<description>` is a no-op: Codex must not rewrite `Updated:`, must not modify `.codex/goal.md`, must not create a git commit, and must leave the git tree clean.
+
 When the internal helper `codex-flow internal state set-goal --description <description>` is available, Codex must prefer it to parse and write `.codex/goal.md`, apply the goal gate, create the goal commit when needed, update runtime sync state when safe, and verify the final git tree is clean.
 
 ## Stability Safety Gate

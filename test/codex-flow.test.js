@@ -581,6 +581,24 @@ test('goal command finalizes project goal context without creating a step', () =
   assert.match(fs.readFileSync(path.join(target, '.codex/state.md'), 'utf8'), /Last Sync Source: goal/);
   assert.equal(run('git', ['status', '--short'], { cwd: target }).stdout.trim(), '');
 
+  const firstGoalHead = run('git', ['rev-parse', 'HEAD'], { cwd: target }).stdout.trim();
+  const firstGoalContent = goal;
+  result = setGoal(
+    target,
+    'Make the crypto bot capable of earning money in live trading.',
+    { updatedDate: '2026-06-07' }
+  );
+  assert.equal(result.ok, true, result.errors.join('\n'));
+  assert.equal(result.details.changed, false);
+  assert.equal(result.details.unchanged, true);
+  assert.equal(result.details.updatedDate, '2026-06-06');
+  assert.equal(result.details.commit, null);
+  assert.equal(result.details.message, null);
+  assert.equal(run('git', ['rev-parse', 'HEAD'], { cwd: target }).stdout.trim(), firstGoalHead);
+  assert.equal(fs.readFileSync(path.join(target, '.codex/goal.md'), 'utf8'), firstGoalContent);
+  assert.doesNotMatch(fs.readFileSync(path.join(target, '.codex/goal.md'), 'utf8'), /Updated: 2026-06-07/);
+  assert.equal(run('git', ['status', '--short'], { cwd: target }).stdout.trim(), '');
+
   let planning = readPlanningContext(target);
   assert.equal(planning.ok, true, planning.errors.join('\n'));
   assert.equal(planning.details.goal.exists, true);
