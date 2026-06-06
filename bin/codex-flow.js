@@ -253,6 +253,7 @@ function parseInternalArgs(args) {
     summary: null,
     implementation: null,
     message: null,
+    nextStep: null,
     checkCommands: [],
     requireCommitWorthy: false
   };
@@ -366,6 +367,21 @@ function parseInternalArgs(args) {
 
     if (arg.startsWith('--implementation=')) {
       options.implementation = arg.slice('--implementation='.length);
+      continue;
+    }
+
+    if (arg === '--next-step') {
+      const value = args[i + 1];
+      if (value === undefined) {
+        throw new CliError('--next-step requires a value.', 2);
+      }
+      options.nextStep = value;
+      i += 1;
+      continue;
+    }
+
+    if (arg.startsWith('--next-step=')) {
+      options.nextStep = arg.slice('--next-step='.length);
       continue;
     }
 
@@ -494,6 +510,7 @@ function runInternalCommand({ commandArgs, options }) {
         title: options.title,
         summary: options.summary,
         implementation: options.implementation,
+        nextStep: options.nextStep,
         message: options.message,
         checkCommands: options.checkCommands
       }));
@@ -507,6 +524,7 @@ function runInternalCommand({ commandArgs, options }) {
         title: options.title,
         summary: options.summary,
         implementation: options.implementation,
+        nextStep: options.nextStep,
         message: options.message,
         checkCommands: options.checkCommands
       }));

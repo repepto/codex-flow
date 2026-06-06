@@ -461,6 +461,8 @@ test('internal normal flow runs resync, task, record, apply finalization, report
     'Added a hello fixture.',
     '--implementation',
     'Added hello.txt and recorded the completed step metadata.',
+    '--next-step',
+    'Add coverage for hello fixture consumers before changing the fixture again.',
     '--message',
     'chore: add hello file',
     '--target',
@@ -470,10 +472,19 @@ test('internal normal flow runs resync, task, record, apply finalization, report
   const finalization = JSON.parse(result.stdout);
   assert.equal(finalization.details.stepId, 1);
   assert.match(finalization.details.commit, /^[a-f0-9]{40}$/);
+  assert.equal(
+    finalization.details.nextStep,
+    'Add coverage for hello fixture consumers before changing the fixture again.'
+  );
 
   assert.equal(fs.existsSync(path.join(target, '.codex/reports/1.md')), true);
   assert.match(fs.readFileSync(path.join(target, '.codex/history.md'), 'utf8'), /## Step 1/);
   assert.match(fs.readFileSync(path.join(target, '.codex/current-step.md'), 'utf8'), /No active step/);
+  assert.match(
+    fs.readFileSync(path.join(target, '.codex/next-step.md'), 'utf8'),
+    /Add coverage for hello fixture consumers before changing the fixture again\./
+  );
+  assert.doesNotMatch(fs.readFileSync(path.join(target, '.codex/next-step.md'), 'utf8'), /No recommendation yet/);
   assert.match(fs.readFileSync(path.join(target, '.codex/state.md'), 'utf8'), /Last Sync Source: apply:1/);
   assert.equal(run('git', ['status', '--short'], { cwd: target }).stdout.trim(), '');
   assert.equal(run('git', ['log', '-1', '--format=%s'], { cwd: target }).stdout.trim(), 'chore: add hello file');
@@ -682,6 +693,8 @@ test('internal finalize-adopt-step adopts manual diff, metadata, commit, and sta
     'finalize-adopt-step',
     '--title',
     'Adopt manual file',
+    '--next-step',
+    'Review the adopted manual file and decide whether it needs project tests.',
     '--message',
     'chore: adopt manual file',
     '--target',
@@ -692,10 +705,18 @@ test('internal finalize-adopt-step adopts manual diff, metadata, commit, and sta
   const finalization = JSON.parse(result.stdout);
   assert.equal(finalization.details.stepId, 1);
   assert.match(finalization.details.commit, /^[a-f0-9]{40}$/);
+  assert.equal(
+    finalization.details.nextStep,
+    'Review the adopted manual file and decide whether it needs project tests.'
+  );
   assert.equal(fs.existsSync(path.join(target, '.codex/reports/1.md')), true);
   assert.match(fs.readFileSync(path.join(target, '.codex/reports/1.md'), 'utf8'), /manual working-tree diff/);
   assert.match(fs.readFileSync(path.join(target, '.codex/history.md'), 'utf8'), /adopt-step accepted the user's manual working-tree diff/);
   assert.match(fs.readFileSync(path.join(target, '.codex/current-step.md'), 'utf8'), /No active step/);
+  assert.match(
+    fs.readFileSync(path.join(target, '.codex/next-step.md'), 'utf8'),
+    /Review the adopted manual file and decide whether it needs project tests\./
+  );
   assert.match(fs.readFileSync(path.join(target, '.codex/state.md'), 'utf8'), /Last Sync Source: adopt-step:1/);
   assert.equal(run('git', ['status', '--short'], { cwd: target }).stdout.trim(), '');
   assert.equal(run('git', ['log', '-1', '--format=%s'], { cwd: target }).stdout.trim(), 'chore: adopt manual file');

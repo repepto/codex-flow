@@ -16,6 +16,9 @@ It must include:
 - sync result, including the git commit created by the completed step;
 - next recommended step.
 
+The next recommended step must be shown to the user after `apply` or `adopt-step`.
+Showing the recommendation must not create, start, or execute the recommended step.
+
 For a successful `adopt-step`, the short report must state that a manual working-tree diff was adopted.
 
 Keep it concise.

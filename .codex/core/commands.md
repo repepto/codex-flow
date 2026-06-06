@@ -26,8 +26,8 @@ codex-flow internal state resync
 codex-flow internal state start-step --prompt <prompt>
 codex-flow internal state record --id <id> --description <description>
 codex-flow internal state discard-step
-codex-flow internal state finalize-step
-codex-flow internal state finalize-adopt-step --title <title>
+codex-flow internal state finalize-step --title <title> --next-step <recommendation>
+codex-flow internal state finalize-adopt-step --title <title> --next-step <recommendation>
 codex-flow internal gate start-step
 codex-flow internal gate apply
 codex-flow internal gate adopt-step --title <title>

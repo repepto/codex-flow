@@ -90,8 +90,8 @@ codex-flow internal state resync
 codex-flow internal state start-step --prompt 'Add compact mode'
 codex-flow internal state record --id compact-mode --description 'Store the preference locally.'
 codex-flow internal state discard-step
-codex-flow internal state finalize-step --title 'Add compact mode'
-codex-flow internal state finalize-adopt-step --title 'Adopt manual diff'
+codex-flow internal state finalize-step --title 'Add compact mode' --next-step 'Cover compact mode persistence.'
+codex-flow internal state finalize-adopt-step --title 'Adopt manual diff' --next-step 'Review the adopted diff for missing tests.'
 codex-flow internal gate start-step
 codex-flow internal gate apply
 codex-flow internal gate adopt-step --title 'Adopt manual diff'
