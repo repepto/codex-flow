@@ -545,6 +545,8 @@ When no active step exists, discussion mode is inactive, sync state is initializ
 - run `discuss` to enter discussion mode before choosing executable work;
 - run read-only review commands such as `status`, `check`, `check:deep`, `compare`, `details`, or `ls-steps:<n>` when useful.
 
+When no active step exists, discussion mode is inactive, sync state is initialized, and the git tree is clean, the `help` output must end with the recommended next step from `.codex/next-step.md`, in addition to the other state-aware guidance. If `.codex/next-step.md` has no substantive recommendation yet, `help` must end by saying that no recommendation has been recorded yet and recommend that the user explicitly provide the next task prompt or run `discuss` to decide one.
+
 When sync state is missing or uninitialized, `help` must explain the install-to-work sequence:
 
 1. review and commit versioned workflow files created by bootstrap;
