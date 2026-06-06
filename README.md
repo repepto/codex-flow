@@ -172,7 +172,7 @@ apply
 
 `apply` performs the work, requires real commit-worthy payload before final metadata, runs checks, writes reports/history, updates `.codex/current-step.md`, and creates a git commit.
 
-Use `discard-step` only when intentionally abandoning the active step. It clears active step metadata without creating a report, history entry, or commit, and refuses to run if project changes would be orphaned.
+Use `discard-step` only when intentionally abandoning the active step. It clears active step metadata, creates a cleanup commit when versioned inactive workflow state changed, leaves the git tree clean, and refuses to run if project changes would be orphaned.
 
 For multiple related tasks that should land in one commit, describe them in one normal prompt. Codex treats the whole prompt as one active step.
 
@@ -209,7 +209,7 @@ Use `help` at any point for state-aware guidance. It is read-only and explains w
 
 - At session start, after reading workflow state, Codex reports the immediate required action when the flow is blocked, dirty, uninitialized, in discussion mode, or inside an active step. If nothing blocks normal work, it shows the recommended next step from `.codex/next-step.md` and waits for an explicit user task.
 - During a normal active step, before `apply`, Codex must not edit project files. It may only maintain `.codex/current-step.md`; standalone runtime commands such as `resync`, `strict:true`, and `strict:false` may update workflow state as defined by the rule files.
-- `discard-step` abandons the active step without completing it. It only rewrites `.codex/current-step.md` back to inactive state, does not run checks or create commits, and is intended for stale or intentionally cancelled active steps.
+- `discard-step` abandons the active step without completing it. It rewrites `.codex/current-step.md` back to inactive state, creates a cleanup commit when needed so the git tree is clean, and is intended for stale or intentionally cancelled active steps.
 - `help` is a read-only state-aware guide. It can run before `resync`, on a dirty tree, during discussion mode, and inside an active step.
 - After a normal prompt creates an active step, Codex reports the step id, changed workflow state, confirms project files were not modified, and lists expected project-file scope when it can infer one. It must not use a generic "waiting for apply" message.
 - Use `discuss` to enter consultation mode before choosing a step. While discussion mode is active, normal prompts do not create steps, edit the main workspace, or create commits. Codex may run diagnostics and may perform mutating experiments only in a disposable scratch workspace such as a temp copy, temporary git worktree, or ignored `.codex/tmp/discuss-*` path. Close it with `discuss:close` before starting executable work.
@@ -461,8 +461,8 @@ resync
 status
 ```
 
-- `discard-step` clears only active step metadata and does not create a report, history entry, or commit.
-- It refuses to run if project changes other than `.codex/current-step.md` and transient runtime files are present.
+- `discard-step` clears active step metadata, creates a cleanup commit when needed for versioned inactive workflow state, and does not create a report, history entry, or next-step recommendation.
+- It refuses to run if git-visible changes other than `.codex/current-step.md` are present.
 - `resync` then reconciles runtime sync state with the current clean git revision.
 
 ### Example 7: Review A Dirty Diff Without Adopting It

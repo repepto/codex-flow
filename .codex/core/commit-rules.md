@@ -2,9 +2,9 @@
 
 ## Purpose
 
-This file defines how `apply` and `adopt-step` use git as the default sync backend.
+This file defines how `apply`, `adopt-step`, and `discard-step` use git as the default sync backend.
 
-The flow core is step state, reports, history, context, and next-step recommendations. Git is required to detect external project changes and create the required commit for each completed normal step or adopted manual step.
+The flow core is step state, reports, history, context, and next-step recommendations. Git is required to detect external project changes, create the required commit for each completed normal step or adopted manual step, and finalize abandoned active-step state when `discard-step` needs a cleanup commit.
 
 There is no standalone Codex `commit` command. If the user wants manual commits, they should use git directly, after which Codex must reconcile through `resync`.
 
@@ -12,9 +12,13 @@ There is no standalone Codex `commit` command. If the user wants manual commits,
 
 One completed normal step or adopted manual step must create exactly one git commit.
 
-The base workflow requires git sync. If git is unavailable, normal steps and `adopt-step` must not start.
+The base workflow requires git sync. If git is unavailable, normal steps and `adopt-step` must not start, and `discard-step` must not finalize active workflow state.
 
-`discard-step` is not a completed normal step or adopted manual step. It must not create a git commit, completed report, history entry, or sync-source update.
+`discard-step` is not a completed normal step or adopted manual step. It must not create a completed report, history entry, or next-step recommendation.
+
+A successful `discard-step` creates a git cleanup commit only when clearing the active step leaves commit-worthy versioned workflow state changes. If clearing the active step restores the git tree to `HEAD`, `discard-step` must not create an empty commit.
+
+A successful `discard-step` must leave the git working tree clean. When it creates a cleanup commit, it may update transient runtime sync state after the commit as long as doing so does not make the git working tree dirty.
 
 A successful normal `apply` creates a git commit only when:
 
@@ -36,6 +40,16 @@ A successful `adopt-step` creates a git commit only when:
 - the commit is not empty.
 
 Because a successful `adopt-step` writes completed-step metadata, a successful adopted manual step must create a git commit. If no commit-worthy changes exist after excluding transient runtime state, Codex must stop and require manual cleanup, `resync`, or manual resolution.
+
+A successful `discard-step` creates a git cleanup commit only when:
+
+- an active step exists;
+- no git-visible changes are present other than active-step metadata;
+- `.codex/current-step.md` has been rewritten to inactive state;
+- commit-worthy versioned workflow state changes remain after excluding transient runtime state;
+- the cleanup commit is not empty.
+
+If cleanup commit creation fails after active-step state was rewritten, Codex must restore the pre-discard active step state before stopping whenever exact recovery is possible.
 
 ## Commit Message Format
 
@@ -142,7 +156,7 @@ Default state format:
 Sync Backend: git
 Last Known Revision: <git revision or none>
 Last Known Branch: <git branch or none>
-Last Sync Source: <apply:<step-id> | adopt-step:<step-id> | resync | external | none>
+Last Sync Source: <apply:<step-id> | adopt-step:<step-id> | discard-step:<step-id> | resync | external | none>
 Strict Mode: <true | false>
 Discussion Mode: <none | active>
 ```
@@ -161,6 +175,7 @@ State lifecycle:
 - if the current revision or branch changed outside the Codex flow, Codex must stop and require `resync`;
 - after the Codex-created commit, Codex updates `.codex/state.md` with the new git revision.
 - after a successful `adopt-step`, Codex updates `.codex/state.md` with `Last Sync Source: adopt-step:<step-id>` and the adopted step commit revision.
+- after a successful `discard-step` cleanup commit, Codex updates `.codex/state.md` with `Last Sync Source: discard-step:<step-id>` and the cleanup commit revision when `.codex/state.md` is transient and doing so will not dirty the git tree.
 When `Discussion Mode: active`, non-command prompts are read-only discussion prompts and must not create active steps or project changes.
 
 Because git commits cannot contain their own final hash, `.codex/state.md` is runtime sync state, not completed step memory.
@@ -206,7 +221,7 @@ Codex must not commit transient runtime state:
 
 `.codex/current-step.md` must not be committed while it contains an active step.
 
-After a successful `apply` or `adopt-step`, `.codex/current-step.md` must be committed when it changed and is in its inactive final state:
+After a successful `apply`, `adopt-step`, or cleanup-committing `discard-step`, `.codex/current-step.md` must be committed when it changed and is in its inactive final state:
 
 ```text
 No active step.

@@ -490,26 +490,85 @@ test('internal normal flow runs resync, task, record, apply finalization, report
   assert.equal(run('git', ['log', '-1', '--format=%s'], { cwd: target }).stdout.trim(), 'chore: add hello file');
 });
 
-test('discard-step clears only active step metadata and leaves a clean tree', () => {
+test('discard-step finalizes active state, leaves a clean tree, and allows resync', () => {
   const target = makeTempDir('codex-flow-discard-step-');
   initGit(target);
   assert.equal(runCli(['init', '--target', target]).status, 0);
   commitVersionedInstall(target);
   assert.equal(runCli(['internal', 'state', 'resync', '--target', target]).status, 0);
+  fs.writeFileSync(path.join(target, '.codex/history.md'), `# History
+
+## Step 1
+
+Title:
+Seed completed step
+
+Sync:
+seed commit
+
+Summary:
+Seeded completed history for discard finalization.
+
+Important Knowledge:
+none
+
+Report:
+reports/1.md
+`, 'utf8');
+  fs.writeFileSync(path.join(target, '.codex/reports/1.md'), `# Step 1: Seed completed step
+
+## Task
+
+Seed completed history.
+
+## Applied Decisions
+
+The step was completed directly from the task.
+
+## Reasoning
+
+Seed data for discard-step finalization coverage.
+
+## Implementation Summary
+
+Seeded completed history.
+
+`, 'utf8');
+  fs.writeFileSync(path.join(target, '.codex/current-step.md'), `# Current Step
+
+No active step.
+
+Last completed step: none
+`, 'utf8');
+  assert.equal(run('git', ['add', '--', '.codex/history.md', '.codex/reports/1.md', '.codex/current-step.md'], { cwd: target }).status, 0);
+  assert.equal(run('git', ['commit', '-m', 'chore: seed completed step'], { cwd: target }).status, 0);
+  assert.equal(run('git', ['status', '--short'], { cwd: target }).stdout.trim(), '');
+  assert.equal(runCli(['internal', 'state', 'resync', '--target', target]).status, 0);
+
   assert.equal(runCli(['internal', 'state', 'start-step', '--prompt', 'Discard this step', '--target', target]).status, 0);
   assert.match(fs.readFileSync(path.join(target, '.codex/current-step.md'), 'utf8'), /Status: active/);
+  assert.match(fs.readFileSync(path.join(target, '.codex/current-step.md'), 'utf8'), /Step ID: 2/);
 
   const result = runCli(['internal', 'state', 'discard-step', '--target', target]);
   assert.equal(result.status, 0, result.stdout + result.stderr);
   const discard = JSON.parse(result.stdout);
-  assert.equal(discard.details.discardedStepId, 1);
-  assert.equal(discard.details.lastCompletedStep, 'none');
+  assert.equal(discard.details.discardedStepId, 2);
+  assert.equal(discard.details.lastCompletedStep, '1');
+  assert.equal(discard.details.committed, true);
+  assert.equal(discard.details.message, 'chore: discard step 2');
+  assert.equal(discard.details.runtimeStateUpdated, true);
   assert.match(fs.readFileSync(path.join(target, '.codex/current-step.md'), 'utf8'), /No active step/);
-  assert.match(fs.readFileSync(path.join(target, '.codex/current-step.md'), 'utf8'), /Last completed step: none/);
-  assert.equal(fs.existsSync(path.join(target, '.codex/reports/1.md')), false);
-  assert.doesNotMatch(fs.readFileSync(path.join(target, '.codex/history.md'), 'utf8'), /## Step 1/);
+  assert.match(fs.readFileSync(path.join(target, '.codex/current-step.md'), 'utf8'), /Last completed step: 1/);
+  assert.equal(fs.existsSync(path.join(target, '.codex/reports/2.md')), false);
+  assert.doesNotMatch(fs.readFileSync(path.join(target, '.codex/history.md'), 'utf8'), /## Step 2/);
   assert.equal(run('git', ['status', '--short'], { cwd: target }).stdout.trim(), '');
+  assert.match(fs.readFileSync(path.join(target, '.codex/state.md'), 'utf8'), /Last Sync Source: discard-step:2/);
+  assert.equal(run('git', ['log', '-1', '--format=%s'], { cwd: target }).stdout.trim(), 'chore: discard step 2');
+
+  const resync = runCli(['internal', 'state', 'resync', '--target', target]);
+  assert.equal(resync.status, 0, resync.stdout + resync.stderr);
   assert.match(fs.readFileSync(path.join(target, '.codex/state.md'), 'utf8'), /Last Sync Source: resync/);
+  assert.equal(run('git', ['status', '--short'], { cwd: target }).stdout.trim(), '');
 
   const secondDiscard = runCli(['internal', 'state', 'discard-step', '--target', target]);
   assert.equal(secondDiscard.status, 1);

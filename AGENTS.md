@@ -118,7 +118,7 @@ This normal-step pre-apply restriction does not block standalone workflow comman
 
 `apply` is the normal execution command. It must follow `.codex/core/commands.md`, `.codex/core/commit-rules.md`, `.codex/core/after-step.md`, and `.codex/core/step-report-rules.md`.
 
-`discard-step` is the active-step abandonment command. It must follow `.codex/core/commands.md`, may update only `.codex/current-step.md`, must not create completed-step metadata or commits, and must refuse to run when project changes other than active-step metadata and transient runtime files are present.
+`discard-step` is the active-step abandonment command. It must follow `.codex/core/commands.md` and `.codex/core/commit-rules.md`, must not create completed-step metadata, and must refuse to run when git-visible changes other than active-step metadata are present. A successful `discard-step` must leave no active step and a clean git working tree, creating a cleanup commit for versioned inactive workflow state when needed.
 
 `adopt-step "title"` is the manual-diff adoption command. It must follow `.codex/core/commands.md`, `.codex/core/commit-rules.md`, `.codex/core/after-step.md`, and `.codex/core/step-report-rules.md`.
 

@@ -413,19 +413,25 @@ Behavior:
 
 - requires an active step;
 - abandons the active step without applying work;
-- updates only `.codex/current-step.md` back to inactive state;
+- updates `.codex/current-step.md` back to inactive state;
 - derives `Last completed step` from completed history/reports;
 - does not modify project code;
 - does not run checks;
 - does not create completed-step metadata;
 - does not update `.codex/history.md`, `.codex/last-report.md`, `.codex/reports/`, `.codex/next-step.md`, or `.codex/context.md`;
-- does not update `.codex/state.md`;
-- does not create commits;
-- does not initialize or advance sync state.
+- finalizes versioned workflow state automatically so the git working tree is clean after success;
+- creates at most one cleanup git commit when inactive versioned workflow state differs from `HEAD` after clearing the active step;
+- updates transient `.codex/state.md` after a cleanup commit when doing so will not make the git working tree dirty;
+- does not create completed-step history, reports, or next-step recommendations;
+- leaves no active step and no pending git-visible workflow state changes after success.
 
-`discard-step` is for intentionally abandoning stale, mistaken, or no-longer-needed active steps. It is not a completed Codex step and must not be recorded as one.
+`discard-step` is for intentionally abandoning stale, mistaken, or no-longer-needed active steps. It is a terminal workflow operation, but it is not a completed Codex step and must not be recorded as one.
 
-Before discarding, Codex must inspect git-visible working-tree changes. If any staged, unstaged tracked-file, or untracked non-ignored project changes are present other than `.codex/current-step.md` and transient runtime files, Codex must stop and report those paths. Codex must not use `discard-step` to hide or orphan project work.
+Before discarding, Codex must inspect git-visible working-tree changes. If any staged, unstaged tracked-file, or untracked non-ignored changes are present other than `.codex/current-step.md`, Codex must stop and report those paths. Codex must not use `discard-step` to hide or orphan project work.
+
+If clearing the active step leaves commit-worthy versioned workflow state changes, Codex must commit those changes before reporting success. The cleanup commit must not create completed-step metadata and must not commit `.codex/current-step.md` while it contains an active step.
+
+If cleanup commit creation fails, Codex must restore the pre-discard active step state and stop. The step remains active when exact recovery succeeds.
 
 If no active step exists, return:
 
@@ -433,7 +439,7 @@ If no active step exists, return:
 No active step.
 ```
 
-After a successful `discard-step`, if the git revision or branch changed outside the Codex flow, run `resync` before starting new executable work.
+After a successful `discard-step`, `resync` must be immediately possible because the working tree is clean and `.codex/current-step.md` is inactive.
 
 ## adopt-step
 
