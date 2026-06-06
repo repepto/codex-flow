@@ -10,6 +10,7 @@ const {
   REMOVED_COMMANDS,
   buildCommitPlan,
   calculateNextStepId,
+  discardActiveStep,
   evaluateAdoptStepGate,
   evaluateApplyGate,
   evaluateApplyPreflight,
@@ -484,6 +485,10 @@ function runInternalCommand({ commandArgs, options }) {
       return printInternalResult(recordDecision(targetRoot, options.id, options.description));
     }
 
+    if (action === 'discard-step') {
+      return printInternalResult(discardActiveStep(targetRoot));
+    }
+
     if (action === 'finalize-step') {
       return printInternalResult(finalizeStep(targetRoot, {
         title: options.title,
@@ -536,7 +541,7 @@ function runInternalCommand({ commandArgs, options }) {
   }
 
   throw new CliError(
-    'Unknown internal command. Supported: parse-command, validate-state, next-step-id, commit-plan, preflight apply, state resync|start-step|record|finalize-step|finalize-adopt-step, gate start-step|apply|adopt-step|resync|stability.',
+    'Unknown internal command. Supported: parse-command, validate-state, next-step-id, commit-plan, preflight apply, state resync|start-step|record|discard-step|finalize-step|finalize-adopt-step, gate start-step|apply|adopt-step|resync|stability.',
     2
   );
 }

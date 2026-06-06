@@ -35,6 +35,7 @@ const {
   calculateNextStepId,
   COMMAND_FORMATS,
   REMOVED_COMMANDS,
+  discardActiveStep,
   evaluateAdoptStepGate,
   evaluateApplyGate,
   evaluateApplyPreflight,
@@ -67,6 +68,7 @@ test('exact workflow command parser accepts only supported exact prompts', () =>
     'forget:api-v2',
     'forget',
     'apply',
+    'discard-step',
     'adopt-step "Adopt manual changes"',
     'help',
     'status',
@@ -475,6 +477,44 @@ test('internal normal flow runs resync, task, record, apply finalization, report
   assert.match(fs.readFileSync(path.join(target, '.codex/state.md'), 'utf8'), /Last Sync Source: apply:1/);
   assert.equal(run('git', ['status', '--short'], { cwd: target }).stdout.trim(), '');
   assert.equal(run('git', ['log', '-1', '--format=%s'], { cwd: target }).stdout.trim(), 'chore: add hello file');
+});
+
+test('discard-step clears only active step metadata and leaves a clean tree', () => {
+  const target = makeTempDir('codex-flow-discard-step-');
+  initGit(target);
+  assert.equal(runCli(['init', '--target', target]).status, 0);
+  commitVersionedInstall(target);
+  assert.equal(runCli(['internal', 'state', 'resync', '--target', target]).status, 0);
+  assert.equal(runCli(['internal', 'state', 'start-step', '--prompt', 'Discard this step', '--target', target]).status, 0);
+  assert.match(fs.readFileSync(path.join(target, '.codex/current-step.md'), 'utf8'), /Status: active/);
+
+  const result = runCli(['internal', 'state', 'discard-step', '--target', target]);
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  const discard = JSON.parse(result.stdout);
+  assert.equal(discard.details.discardedStepId, 1);
+  assert.equal(discard.details.lastCompletedStep, 'none');
+  assert.match(fs.readFileSync(path.join(target, '.codex/current-step.md'), 'utf8'), /No active step/);
+  assert.match(fs.readFileSync(path.join(target, '.codex/current-step.md'), 'utf8'), /Last completed step: none/);
+  assert.equal(fs.existsSync(path.join(target, '.codex/reports/1.md')), false);
+  assert.doesNotMatch(fs.readFileSync(path.join(target, '.codex/history.md'), 'utf8'), /## Step 1/);
+  assert.equal(run('git', ['status', '--short'], { cwd: target }).stdout.trim(), '');
+  assert.match(fs.readFileSync(path.join(target, '.codex/state.md'), 'utf8'), /Last Sync Source: resync/);
+});
+
+test('discard-step refuses to orphan active-step project changes', () => {
+  const target = makeTempDir('codex-flow-discard-step-dirty-');
+  initGit(target);
+  assert.equal(runCli(['init', '--target', target]).status, 0);
+  commitVersionedInstall(target);
+  assert.equal(runCli(['internal', 'state', 'resync', '--target', target]).status, 0);
+  assert.equal(runCli(['internal', 'state', 'start-step', '--prompt', 'Add payload', '--target', target]).status, 0);
+  fs.writeFileSync(path.join(target, 'payload.txt'), 'payload\n', 'utf8');
+
+  const result = discardActiveStep(target);
+  assert.equal(result.ok, false);
+  assert.match(result.errors.join('\n'), /project changes are present: payload\.txt/);
+  assert.match(fs.readFileSync(path.join(target, '.codex/current-step.md'), 'utf8'), /Status: active/);
+  assert.equal(fs.existsSync(path.join(target, '.codex/reports/1.md')), false);
 });
 
 test('internal finalize-step rejects metadata-only apply completion', () => {
