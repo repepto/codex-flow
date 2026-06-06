@@ -61,6 +61,29 @@ The `discuss` and `discuss:close` commands may create or update `.codex/state.md
 
 If `.codex/overrides/` exists, apply overrides according to `.codex/core/overrides.md`. If it does not exist, continue with the base rule files.
 
+## Session Start Report
+
+After startup completes and before starting or continuing work in an installed downstream project, Codex must give a concise session-start report.
+
+The session-start report is read-only. It must not create an active step, modify project files, update workflow state, run checks, or create commits.
+
+If the workflow is blocked, ambiguous, uninitialized, dirty, in active discussion mode, or already inside an active step, the report must say what must be done now before the next executable step can start or continue safely.
+
+The report must prefer the most immediate required action:
+
+- if bootstrap created versioned project-owned files, tell the user to review and commit those files before `resync`;
+- if workflow state is ambiguous or inconsistent, state the ambiguity and require manual resolution or `resync` when allowed;
+- if sync state is missing, uninitialized, or mismatched, tell the user to make the git tree clean and run `resync`;
+- if the git tree has pre-existing project changes and no active step, tell the user to clean or commit them and then run `resync`, or use `adopt-step "title"` only when intentionally adopting the manual diff;
+- if `Discussion Mode: active`, tell the user that executable work is blocked until `discuss:close`, while discussion/read-only commands may continue;
+- if an active step exists, summarize the active step and say the valid next actions are to continue/refine it, run `apply` when ready, or use `discard-step` only when abandoning it safely.
+
+If no such blocker exists, the report must show the recommended next step from `.codex/next-step.md`.
+
+If `.codex/next-step.md` has no substantive recommendation yet, Codex must say that no recommendation has been recorded yet and recommend that the user explicitly provide the next task prompt or run `discuss` to decide one.
+
+Showing the recommended next step must not create, start, or execute that step. Codex must wait for the user to explicitly request the next task.
+
 ## Rule And Data Separation
 
 Operational rules must live only in `AGENTS.md`, `.codex/core/`, and valid project override files under `.codex/overrides/`.
