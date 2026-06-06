@@ -11,6 +11,7 @@ const {
   buildCommitPlan,
   calculateNextStepId,
   discardActiveStep,
+  evaluateGoalGate,
   evaluateAdoptStepGate,
   evaluateApplyGate,
   evaluateApplyPreflight,
@@ -23,8 +24,10 @@ const {
   finalizeStep,
   normalizeCommandFormat,
   parseWorkflowCommand,
+  readPlanningContext,
   recordDecision,
   resyncState,
+  setGoal,
   startRecommendedStep,
   startStep,
   validateWorkflowState
@@ -117,6 +120,7 @@ Discussion Mode: none
 const projectOwnedPaths = [
   '.codex/config.toml',
   '.codex/context.md',
+  '.codex/goal.md',
   '.codex/history.md',
   '.codex/current-step.md',
   '.codex/next-step.md',
@@ -456,6 +460,10 @@ function runInternalCommand({ commandArgs, options }) {
     return printInternalResult(validateWorkflowState(targetRoot));
   }
 
+  if (group === 'planning-context') {
+    return printInternalResult(readPlanningContext(targetRoot));
+  }
+
   if (group === 'next-step-id') {
     result = calculateNextStepId(targetRoot);
     return printInternalResult({
@@ -494,6 +502,13 @@ function runInternalCommand({ commandArgs, options }) {
 
     if (action === 'start-recommended-step') {
       return printInternalResult(startRecommendedStep(targetRoot));
+    }
+
+    if (action === 'set-goal') {
+      if (options.description === null) {
+        throw new CliError('internal state set-goal requires --description.', 2);
+      }
+      return printInternalResult(setGoal(targetRoot, options.description));
     }
 
     if (action === 'record') {
@@ -541,6 +556,13 @@ function runInternalCommand({ commandArgs, options }) {
       return printInternalResult(evaluateStartStepGate(targetRoot));
     }
 
+    if (action === 'goal') {
+      if (options.description === null) {
+        throw new CliError('internal gate goal requires --description.', 2);
+      }
+      return printInternalResult(evaluateGoalGate(targetRoot, options.description));
+    }
+
     if (action === 'apply') {
       return printInternalResult(evaluateApplyGate(targetRoot));
     }
@@ -564,7 +586,7 @@ function runInternalCommand({ commandArgs, options }) {
   }
 
   throw new CliError(
-    'Unknown internal command. Supported: parse-command, validate-state, next-step-id, commit-plan, preflight apply, state resync|start-step|start-recommended-step|record|discard-step|finalize-step|finalize-adopt-step, gate start-step|apply|adopt-step|resync|stability.',
+    'Unknown internal command. Supported: parse-command, validate-state, planning-context, next-step-id, commit-plan, preflight apply, state resync|start-step|start-recommended-step|set-goal|record|discard-step|finalize-step|finalize-adopt-step, gate start-step|goal|apply|adopt-step|resync|stability.',
     2
   );
 }

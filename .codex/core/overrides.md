@@ -31,6 +31,7 @@ Overrides are invalid for state/data files such as:
 
 ```text
 context.md
+goal.md
 history.md
 current-step.md
 next-step.md

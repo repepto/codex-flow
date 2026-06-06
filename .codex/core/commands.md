@@ -19,17 +19,20 @@ The `codex-flow` terminal CLI may provide internal machine-check helpers such as
 ```text
 codex-flow internal parse-command --prompt <prompt>
 codex-flow internal validate-state
+codex-flow internal planning-context
 codex-flow internal next-step-id
 codex-flow internal commit-plan
 codex-flow internal preflight apply
 codex-flow internal state resync
 codex-flow internal state start-step --prompt <prompt>
 codex-flow internal state start-recommended-step
+codex-flow internal state set-goal --description <description>
 codex-flow internal state record --id <id> --description <description>
 codex-flow internal state discard-step
 codex-flow internal state finalize-step --title <title> --next-step <recommendation>
 codex-flow internal state finalize-adopt-step --title <title> --next-step <recommendation>
 codex-flow internal gate start-step
+codex-flow internal gate goal --description <description>
 codex-flow internal gate apply
 codex-flow internal gate adopt-step --title <title>
 codex-flow internal gate resync
@@ -103,6 +106,48 @@ If `.codex/next-step.md` has no substantive recommendation yet, `ok` must not cr
 
 When the internal helper `codex-flow internal state start-recommended-step` is available, Codex must prefer it to parse `.codex/next-step.md`, apply the start-step gate, and create the active step.
 
+## goal
+
+Format:
+
+```text
+goal:<description>
+```
+
+`description` must not be empty after trimming whitespace and must not contain line breaks.
+
+Examples:
+
+```text
+goal:Make the crypto bot capable of earning money in live trading.
+goal:Build a maintainable slot platform that can support dozens of games.
+```
+
+Behavior:
+
+- valid only as a standalone command received while Codex is waiting for user input;
+- creates or replaces `.codex/goal.md` with one active long-term project goal;
+- is project-level context, not a workflow step;
+- requires no active step, discussion mode inactive, initialized matching sync state, and a clean git working tree;
+- requires `.codex/state.md` to be ignored transient runtime state, not a tracked file;
+- does not create an active step;
+- does not create records;
+- does not create reports;
+- does not run checks;
+- does not modify project source files;
+- does not invoke `apply`, `adopt-step`, or `discard-step` logic;
+- finalizes the `.codex/goal.md` update automatically with a git commit when the goal file changes;
+- updates transient `.codex/state.md` after a goal commit when doing so will not make the git working tree dirty;
+- leaves no active step, no pending workflow state changes, and a clean git working tree after success.
+
+The goal influences prioritization and interpretation only. It must never authorize code changes, bypass workflow rules, bypass safety gates, bypass Strict Mode, or replace the record/apply flow.
+
+Before proposing solutions, plans, tasks, or implementation approaches, Codex must read and consider `.codex/goal.md` when it exists, along with `.codex/context.md` and `.codex/history.md`.
+
+If `.codex/goal.md` already exists, `goal:<description>` replaces the previous goal. Only one active goal exists.
+
+When the internal helper `codex-flow internal state set-goal --description <description>` is available, Codex must prefer it to parse and write `.codex/goal.md`, apply the goal gate, create the goal commit when needed, update runtime sync state when safe, and verify the final git tree is clean.
+
 ## Stability Safety Gate
 
 Before creating or updating workflow state, creating a new active step, continuing an active step, executing a state-changing command, running `apply`, or running `adopt-step`, Codex must check whether the requested work could damage or weaken the workflow system.
@@ -111,6 +156,7 @@ Codex must run this gate for:
 
 - a non-command prompt that would create a new active step;
 - any prompt that would continue an active step;
+- `goal` before creating or replacing `.codex/goal.md`;
 - `record` and any other command that creates or updates `.codex/current-step.md` or `.codex/state.md`;
 - `adopt-step` before adopting manual working-tree changes;
 - `apply`.
@@ -185,6 +231,8 @@ Close discussion with discuss:close before running this command.
 ```
 
 Read-only commands `help`, `status`, `compare`, `check`, `check:deep`, `details`, `details:<id>`, and `ls-steps:<n>` may run while discussion mode is active.
+
+Before proposing solutions, plans, tasks, or implementation approaches, Codex must read planning context from `.codex/goal.md` when it exists, `.codex/context.md`, and `.codex/history.md`. If the internal helper `codex-flow internal planning-context` is available, Codex must prefer it for this context load.
 
 Before creating a new active step, Codex must pass the sync gate:
 
@@ -512,6 +560,7 @@ Versioned Codex memory/config files protected from pre-existing manual adoption 
 ```text
 .codex/config.toml
 .codex/context.md
+.codex/goal.md
 .codex/history.md
 .codex/current-step.md
 .codex/next-step.md
@@ -576,6 +625,7 @@ When no active step exists, discussion mode is inactive, sync state is initializ
 
 - send a normal task prompt to create a new active step;
 - run `ok` to create a new active step from the recommended next step when `.codex/next-step.md` contains a substantive recommendation;
+- run `goal:<description>` to create or replace the long-term project goal in `.codex/goal.md`;
 - run `discuss` to enter discussion mode before choosing executable work;
 - run read-only review commands such as `status`, `check`, `check:deep`, `compare`, `details`, or `ls-steps:<n>` when useful.
 
@@ -594,7 +644,7 @@ When the git tree is dirty before a normal step starts, `help` must distinguish:
 - run `check` for a read-only current-diff review;
 - run `adopt-step "title"` only when the user intentionally wants to convert the manual diff into one completed Codex step and all `adopt-step` gates can pass.
 
-When an active step exists, `help` must explain that a new step, `discuss`, and `adopt-step` are blocked until the current step is completed or resolved. It must list valid current-step actions such as:
+When an active step exists, `help` must explain that a new step, `goal:<description>`, `discuss`, and `adopt-step` are blocked until the current step is completed or resolved. It must list valid current-step actions such as:
 
 - continue discussing or refining the active step;
 - use `record:<id> "description"` to store a decision;
@@ -630,6 +680,7 @@ If an active step exists, show:
 
 - Strict Mode;
 - Discussion Mode;
+- active goal from `.codex/goal.md`, if one exists;
 - Step ID;
 - Task;
 - Decisions;
@@ -642,6 +693,7 @@ If no active step exists, show:
 - Strict Mode;
 - Discussion Mode;
 - no active step;
+- active goal from `.codex/goal.md`, if one exists;
 - last completed step if known from history;
 - recommended next step from `.codex/next-step.md`;
 - relevant state warnings.

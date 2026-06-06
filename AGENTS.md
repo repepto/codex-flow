@@ -42,12 +42,13 @@ After bootstrap, Codex must read project-owned config and state/data:
 
 1. `.codex/config.toml`
 2. `.codex/context.md`
-3. `.codex/history.md`
-4. `.codex/current-step.md`
-5. `.codex/next-step.md`
-6. `.codex/state.md`, if it exists
-7. `.codex/last-report.md`
-8. `.codex/reports/`
+3. `.codex/goal.md`, if it exists
+4. `.codex/history.md`
+5. `.codex/current-step.md`
+6. `.codex/next-step.md`
+7. `.codex/state.md`, if it exists
+8. `.codex/last-report.md`
+9. `.codex/reports/`
 
 If `.codex/state.md` is missing, or if its baseline is uninitialized, Codex must treat sync state as uninitialized and require `resync` before starting a normal step.
 
@@ -88,7 +89,7 @@ Showing the recommended next step must not create, start, or execute that step. 
 
 Operational rules must live only in `AGENTS.md`, `.codex/core/`, and valid project override files under `.codex/overrides/`.
 
-Project-owned state/data files include `.codex/context.md`, `.codex/history.md`, `.codex/current-step.md`, `.codex/next-step.md`, `.codex/state.md`, `.codex/last-report.md`, `.codex/reports/*`, and `.codex/tmp/`.
+Project-owned state/data files include `.codex/context.md`, `.codex/goal.md`, `.codex/history.md`, `.codex/current-step.md`, `.codex/next-step.md`, `.codex/state.md`, `.codex/last-report.md`, `.codex/reports/*`, and `.codex/tmp/`.
 
 State/data files may contain current project memory, reports, placeholders, and active runtime state. They must not contain operational rules required for Codex behavior.
 
@@ -103,6 +104,8 @@ When upgrading this workflow system in an installed project, replace `AGENTS.md`
 Commands are valid only when the entire user prompt exactly matches a command format in `.codex/core/commands.md`.
 
 In Strict Mode, Codex may make factual or technical conclusions only from project code, project files, dependency code, command output, and user-provided context that are available in the current session. If the available context is insufficient to support a conclusion, Codex must stop that line of reasoning, say what context is missing, and wait for the user to provide it or allow a way to inspect it. User-provided context may be used, but Codex must not present it as independently verified unless it can verify it from accessible context.
+
+Before proposing solutions, plans, tasks, or implementation approaches, Codex must read and consider `.codex/goal.md` when it exists, along with `.codex/context.md` and `.codex/history.md`. The goal influences prioritization and interpretation only. It must not authorize code changes, bypass workflow rules, bypass safety gates, bypass Strict Mode, or replace the record/apply flow.
 
 Before creating a new active step, continuing an active step, running `apply`, running `discard-step`, or running `adopt-step`, Codex must apply the stability safety gate defined in `.codex/core/commands.md`.
 

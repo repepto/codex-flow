@@ -2,9 +2,9 @@
 
 ## Purpose
 
-This file defines how `apply`, `adopt-step`, and `discard-step` use git as the default sync backend.
+This file defines how `apply`, `adopt-step`, `discard-step`, and `goal` use git as the default sync backend.
 
-The flow core is step state, reports, history, context, and next-step recommendations. Git is required to detect external project changes, create the required commit for each completed normal step or adopted manual step, and finalize abandoned active-step state when `discard-step` needs a cleanup commit.
+The flow core is step state, reports, history, context, project goal, and next-step recommendations. Git is required to detect external project changes, create the required commit for each completed normal step or adopted manual step, finalize abandoned active-step state when `discard-step` needs a cleanup commit, and finalize project goal updates.
 
 There is no standalone Codex `commit` command. If the user wants manual commits, they should use git directly, after which Codex must reconcile through `resync`.
 
@@ -19,6 +19,12 @@ The base workflow requires git sync. If git is unavailable, normal steps and `ad
 A successful `discard-step` creates a git cleanup commit only when clearing the active step leaves commit-worthy versioned workflow state changes. If clearing the active step restores the git tree to `HEAD`, `discard-step` must not create an empty commit.
 
 A successful `discard-step` must leave the git working tree clean. When it creates a cleanup commit, it may update transient runtime sync state after the commit as long as doing so does not make the git working tree dirty.
+
+`goal:<description>` is not a completed normal step or adopted manual step. It must not create an active step, completed report, history entry, record, or next-step recommendation.
+
+A successful `goal:<description>` creates a git commit only when `.codex/goal.md` changes. If the requested goal already matches the committed goal file, `goal` must not create an empty commit.
+
+A successful `goal:<description>` must leave the git working tree clean. When it creates a goal commit, it may update transient runtime sync state after the commit as long as doing so does not make the git working tree dirty.
 
 A successful normal `apply` creates a git commit only when:
 
@@ -50,6 +56,19 @@ A successful `discard-step` creates a git cleanup commit only when:
 - the cleanup commit is not empty.
 
 If cleanup commit creation fails after active-step state was rewritten, Codex must restore the pre-discard active step state before stopping whenever exact recovery is possible.
+
+A successful `goal:<description>` creates a git goal commit only when:
+
+- no active step exists;
+- discussion mode is inactive;
+- the initialized git sync state matches the current revision and branch;
+- `.codex/state.md` is ignored transient runtime state, not a tracked file;
+- the git working tree is clean before the goal file is written;
+- `.codex/goal.md` has been created or replaced;
+- commit-worthy versioned goal changes remain after excluding transient runtime state;
+- the goal commit is not empty.
+
+If goal commit creation fails after `.codex/goal.md` was written, Codex must restore the pre-goal `.codex/goal.md` and runtime state before stopping whenever exact recovery is possible.
 
 ## Commit Message Format
 
@@ -156,7 +175,7 @@ Default state format:
 Sync Backend: git
 Last Known Revision: <git revision or none>
 Last Known Branch: <git branch or none>
-Last Sync Source: <apply:<step-id> | adopt-step:<step-id> | discard-step:<step-id> | resync | external | none>
+Last Sync Source: <apply:<step-id> | adopt-step:<step-id> | discard-step:<step-id> | goal | resync | external | none>
 Strict Mode: <true | false>
 Discussion Mode: <none | active>
 ```
@@ -176,6 +195,7 @@ State lifecycle:
 - after the Codex-created commit, Codex updates `.codex/state.md` with the new git revision.
 - after a successful `adopt-step`, Codex updates `.codex/state.md` with `Last Sync Source: adopt-step:<step-id>` and the adopted step commit revision.
 - after a successful `discard-step` cleanup commit, Codex updates `.codex/state.md` with `Last Sync Source: discard-step:<step-id>` and the cleanup commit revision when `.codex/state.md` is transient and doing so will not dirty the git tree.
+- after a successful `goal` commit, Codex updates `.codex/state.md` with `Last Sync Source: goal` and the goal commit revision when `.codex/state.md` is transient and doing so will not dirty the git tree.
 When `Discussion Mode: active`, non-command prompts are read-only discussion prompts and must not create active steps or project changes.
 
 Because git commits cannot contain their own final hash, `.codex/state.md` is runtime sync state, not completed step memory.
@@ -198,6 +218,7 @@ AGENTS.md
 .codex/core/overrides.md
 .codex/config.toml
 .codex/context.md
+.codex/goal.md
 .codex/current-step.md
 .codex/history.md
 .codex/next-step.md

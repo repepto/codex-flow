@@ -71,6 +71,7 @@ They cover:
 - documented command-surface consistency between `.codex/core/commands.md` and `README.md`;
 - removed-command detection for commands such as `commit`, `apply-only`, `run-steps`, `run-steps:auto`, and `abort-steps`;
 - normal-step sync gate evaluation;
+- project-goal validation and planning-context loading;
 - workflow state validation for `.codex/state.md`, `.codex/current-step.md`, history, reports, and next step id calculation;
 - `apply` preflight validation for active step id, base revision, base branch, and discussion-mode blockers;
 - commit-plan validation that excludes transient runtime state and blocks active `.codex/current-step.md` from commit scope;
@@ -83,17 +84,20 @@ They cover:
 ```bash
 codex-flow internal parse-command --prompt 'apply'
 codex-flow internal validate-state
+codex-flow internal planning-context
 codex-flow internal next-step-id
 codex-flow internal commit-plan --require-commit-worthy
 codex-flow internal preflight apply
 codex-flow internal state resync
 codex-flow internal state start-step --prompt 'Add compact mode'
 codex-flow internal state start-recommended-step
+codex-flow internal state set-goal --description 'Build a maintainable slot platform that can support dozens of games.'
 codex-flow internal state record --id compact-mode --description 'Store the preference locally.'
 codex-flow internal state discard-step
 codex-flow internal state finalize-step --title 'Add compact mode' --next-step 'Cover compact mode persistence.'
 codex-flow internal state finalize-adopt-step --title 'Adopt manual diff' --next-step 'Review the adopted diff for missing tests.'
 codex-flow internal gate start-step
+codex-flow internal gate goal --description 'Build a maintainable slot platform that can support dozens of games.'
 codex-flow internal gate apply
 codex-flow internal gate adopt-step --title 'Adopt manual diff'
 codex-flow internal gate resync
@@ -145,6 +149,8 @@ The generated project-owned files include:
 .codex/state.md
 ```
 
+`.codex/goal.md` is also project-owned versioned context, but it is not created by bootstrap. It is created or replaced by the `goal:<description>` workflow command.
+
 Commit the generated versioned project-owned files before the first `resync`. `.codex/config.toml` is versioned project runtime config; `.codex/state.md` remains ignored runtime state. `.codex/reports/` may be an empty local directory until the first completed step writes a report file.
 
 After the working tree is clean, run:
@@ -183,6 +189,7 @@ For multiple related tasks that should land in one commit, describe them in one 
 help
 status
 ok
+goal:<description>
 discuss
 discuss:close
 record:<id> "description"
@@ -211,6 +218,7 @@ Use `help` at any point for state-aware guidance. It is read-only and explains w
 
 - At session start, after reading workflow state, Codex reports the immediate required action when the flow is blocked, dirty, uninitialized, in discussion mode, or inside an active step. If nothing blocks normal work, it shows the recommended next step from `.codex/next-step.md` and waits for an explicit user task or `ok` to accept the recommendation.
 - `ok` starts a new active step from `.codex/next-step.md` when the normal start-step gate passes and the recommendation is substantive.
+- `goal:<description>` creates or replaces `.codex/goal.md` as long-term project context. It is not a step, does not authorize source changes, creates a goal commit when the file changes, and leaves the git tree clean.
 - During a normal active step, before `apply`, Codex must not edit project files. It may only maintain `.codex/current-step.md`; standalone runtime commands such as `resync`, `strict:true`, and `strict:false` may update workflow state as defined by the rule files.
 - `discard-step` abandons the active step without completing it. It rewrites `.codex/current-step.md` back to inactive state, creates a cleanup commit when needed so the git tree is clean, and is intended for stale or intentionally cancelled active steps.
 - `help` is a read-only state-aware guide. It can run before `resync`, on a dirty tree, during discussion mode, and inside an active step.
@@ -245,6 +253,7 @@ Codex loads the project-owned `.codex/config.toml` only after the project is tru
 ## Files Users Usually Touch
 
 - `.codex/context.md` - long-lived project knowledge, only when it is truly useful.
+- `.codex/goal.md` - long-term project objective created by `goal:<description>`.
 - `.codex/overrides/` - optional project-specific rule extensions.
 
 `.codex/core/` is the upgradeable workflow system. Root `.codex` state/data files are project memory maintained by Codex.
@@ -275,6 +284,7 @@ Do not replace project-owned state/data files or an existing project `.codex/con
 
 ```text
 .codex/context.md
+.codex/goal.md
 .codex/config.toml
 .codex/history.md
 .codex/current-step.md
@@ -536,6 +546,6 @@ resync
 
 - `update` replaces package-owned workflow files: `AGENTS.md` and `.codex/core/*`.
 - It removes obsolete package-owned core files from older starter-pack versions.
-- It may create a missing `.codex/config.toml`, but it does not overwrite an existing project config or touch `.codex/context.md`, `.codex/history.md`, `.codex/current-step.md`, `.codex/state.md`, reports, or tmp files.
+- It may create a missing `.codex/config.toml`, but it does not overwrite an existing project config or touch `.codex/context.md`, `.codex/goal.md`, `.codex/history.md`, `.codex/current-step.md`, `.codex/state.md`, reports, or tmp files.
 - `update --commit` requires a clean git working tree, checks the upgraded install before committing, and creates `chore: update codex flow` only when update changes exist.
 - `resync` makes Codex Flow aware of the upgrade commit after the working tree is clean.

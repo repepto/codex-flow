@@ -95,6 +95,8 @@ No reports available.
 
 Create `.codex/reports/` if missing.
 
+Bootstrap must not create `.codex/goal.md`. That file is created or replaced only by the `goal:<description>` workflow command when the project has a real long-term objective to record.
+
 Create `.codex/state.md` if missing:
 
 ```md
@@ -117,6 +119,7 @@ Bootstrap must not create completed step reports, tmp files, or project override
 These paths are created only by their owning workflow actions or by the user:
 
 ```text
+.codex/goal.md
 .codex/reports/<numeric-id>.md
 .codex/tmp/
 .codex/overrides/

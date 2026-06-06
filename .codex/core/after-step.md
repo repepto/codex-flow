@@ -224,6 +224,7 @@ After every successful step, update `.codex/next-step.md`.
 
 The next-step recommendation must be based on:
 
+- `.codex/goal.md`, when it exists;
 - `.codex/context.md`;
 - `.codex/history.md`;
 - current project and sync state;
