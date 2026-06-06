@@ -41,7 +41,9 @@ To target another project from a local checkout:
 node /path/to/codex-flow/bin/codex-flow.js init --target /path/to/project
 ```
 
-## CLI Reference
+## Terminal CLI Commands
+
+These commands run in a shell, not in Codex chat:
 
 ```bash
 codex-flow init [--target <dir>] [--force] [--dry-run]
@@ -174,7 +176,7 @@ Use `discard-step` only when intentionally abandoning the active step. It clears
 
 For multiple related tasks that should land in one commit, describe them in one normal prompt. Codex treats the whole prompt as one active step.
 
-## Commands
+## Codex Chat Workflow Commands
 
 ```text
 help
@@ -309,7 +311,7 @@ The test suite covers:
 - downstream `update` preserving project-owned state;
 - downstream `update --commit` validation, clean-tree gate, no-op handling, and commit creation;
 - invalid override rejection;
-- sync-gate behavior for `resync`, normal steps, discussion mode, and `adopt-step`.
+- sync-gate behavior for `resync`, normal steps, discussion mode, `discard-step`, and `adopt-step`.
 
 Publish when the package metadata, version, and license are ready:
 
@@ -412,7 +414,7 @@ discuss:close
 - `discuss` updates ignored runtime state only; it does not create a step, edit the main workspace, run executable workflow commands, or create commits.
 - Normal discussion prompts may run useful diagnostics, tests, local inspection, or network lookups. Mutating experiments must happen in a disposable scratch workspace such as a temp copy, temporary git worktree, or ignored `.codex/tmp/discuss-*` path.
 - While discussion mode is active, read-only commands such as `help`, `status`, `check`, `check:deep`, `compare`, `details`, and `ls-steps:<n>` may still run.
-- State-changing or execution commands such as `apply` and `adopt-step` require `discuss:close` first. Normal prompts also remain discussion prompts until discussion mode is closed.
+- State-changing or execution commands such as `apply`, `discard-step`, and `adopt-step` require `discuss:close` first. Normal prompts also remain discussion prompts until discussion mode is closed.
 
 ### Example 5: Complete A Normal Codex Step
 
@@ -438,6 +440,7 @@ apply
 - The step-start response reports `.codex/current-step.md` as the only changed file before `apply`, confirms project files are unchanged, and names expected project-file scope when inferable.
 - `record:<id> "decision"` stores a step decision in `.codex/current-step.md`; it does not edit project code.
 - `apply` performs the work, requires at least one commit-worthy payload change before completed-step metadata, runs required checks, writes reports/history, updates `.codex/current-step.md`, creates one git commit, and updates runtime sync state.
+- `discard-step` can abandon the active step before completion when no project changes would be orphaned.
 
 After success:
 
@@ -447,7 +450,21 @@ details
 
 - `details` shows the latest full report copied to `.codex/last-report.md`.
 
-### Example 6: Review A Dirty Diff Without Adopting It
+### Example 6: Discard A Stale Active Step
+
+Use this when an active step is no longer valid or wanted, such as after `HEAD` changed outside the flow:
+
+```text
+discard-step
+resync
+status
+```
+
+- `discard-step` clears only active step metadata and does not create a report, history entry, or commit.
+- It refuses to run if project changes other than `.codex/current-step.md` and transient runtime files are present.
+- `resync` then reconciles runtime sync state with the current clean git revision.
+
+### Example 7: Review A Dirty Diff Without Adopting It
 
 Use this when files are already changed and you want a read-only risk review:
 
@@ -465,7 +482,7 @@ For a whole-project review instead of current-diff review:
 check:deep
 ```
 
-### Example 7: Adopt Manual File Changes As A Completed Step
+### Example 8: Adopt Manual File Changes As A Completed Step
 
 Use this when the user manually edited files and wants those changes recorded as a real Codex Flow step.
 
@@ -487,7 +504,7 @@ adopt-step "Update compact mode manually"
 - On success, the internal `finalize-adopt-step` helper writes a completed report, updates history and next-step recommendation, creates one git commit, and updates `.codex/state.md` with `Last Sync Source: adopt-step:<step-id>`.
 - On check failure, it leaves the manual diff as-is and does not create completed-step metadata or a git commit.
 
-### Example 8: Put Multiple Tasks In One Step
+### Example 9: Put Multiple Tasks In One Step
 
 Use one normal prompt when multiple related tasks should land as one completed step and one git commit:
 
@@ -499,7 +516,7 @@ Add compact mode setting, persist it, and cover compact mode persistence with te
 - `apply` completes that step as one report/history entry and one git commit.
 - If you want separate commits, send separate normal task prompts and run `apply` after each one.
 
-### Example 9: Upgrade Codex Flow In A Project
+### Example 10: Upgrade Codex Flow In A Project
 
 Run this from the installed project root:
 

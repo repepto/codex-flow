@@ -499,6 +499,10 @@ test('discard-step clears only active step metadata and leaves a clean tree', ()
   assert.doesNotMatch(fs.readFileSync(path.join(target, '.codex/history.md'), 'utf8'), /## Step 1/);
   assert.equal(run('git', ['status', '--short'], { cwd: target }).stdout.trim(), '');
   assert.match(fs.readFileSync(path.join(target, '.codex/state.md'), 'utf8'), /Last Sync Source: resync/);
+
+  const secondDiscard = runCli(['internal', 'state', 'discard-step', '--target', target]);
+  assert.equal(secondDiscard.status, 1);
+  assert.deepEqual(JSON.parse(secondDiscard.stdout).errors, ['No active step.']);
 });
 
 test('discard-step refuses to orphan active-step project changes', () => {

@@ -25,6 +25,7 @@ codex-flow internal preflight apply
 codex-flow internal state resync
 codex-flow internal state start-step --prompt <prompt>
 codex-flow internal state record --id <id> --description <description>
+codex-flow internal state discard-step
 codex-flow internal state finalize-step
 codex-flow internal state finalize-adopt-step --title <title>
 codex-flow internal gate start-step
@@ -400,6 +401,40 @@ If pre-existing project changes are detected before starting a new normal step, 
 
 The only command that may intentionally convert pre-existing manual working-tree changes into completed Codex step history is `adopt-step "title"`.
 
+## discard-step
+
+Format:
+
+```text
+discard-step
+```
+
+Behavior:
+
+- requires an active step;
+- abandons the active step without applying work;
+- updates only `.codex/current-step.md` back to inactive state;
+- derives `Last completed step` from completed history/reports;
+- does not modify project code;
+- does not run checks;
+- does not create completed-step metadata;
+- does not update `.codex/history.md`, `.codex/last-report.md`, `.codex/reports/`, `.codex/next-step.md`, or `.codex/context.md`;
+- does not update `.codex/state.md`;
+- does not create commits;
+- does not initialize or advance sync state.
+
+`discard-step` is for intentionally abandoning stale, mistaken, or no-longer-needed active steps. It is not a completed Codex step and must not be recorded as one.
+
+Before discarding, Codex must inspect git-visible working-tree changes. If any staged, unstaged tracked-file, or untracked non-ignored project changes are present other than `.codex/current-step.md` and transient runtime files, Codex must stop and report those paths. Codex must not use `discard-step` to hide or orphan project work.
+
+If no active step exists, return:
+
+```text
+No active step.
+```
+
+After a successful `discard-step`, if the git revision or branch changed outside the Codex flow, run `resync` before starting new executable work.
+
 ## adopt-step
 
 Format:
@@ -529,6 +564,7 @@ When an active step exists, `help` must explain that a new step, `discuss`, and 
 - use `record:<id> "description"` to store a decision;
 - use `forget:<id>` or `forget` to remove recorded decisions;
 - run `apply` to execute the active step;
+- run `discard-step` to abandon the active step when no project changes would be orphaned;
 - run read-only commands such as `status`, `check`, `check:deep`, `compare`, `details`, or `ls-steps:<n>`.
 
 When discussion mode is active, `help` must explain that normal prompts remain discussion prompts and do not create steps. It must list:

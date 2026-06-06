@@ -14,6 +14,8 @@ One completed normal step or adopted manual step must create exactly one git com
 
 The base workflow requires git sync. If git is unavailable, normal steps and `adopt-step` must not start.
 
+`discard-step` is not a completed normal step or adopted manual step. It must not create a git commit, completed report, history entry, or sync-source update.
+
 A successful normal `apply` creates a git commit only when:
 
 - the current git revision matches the step base revision;

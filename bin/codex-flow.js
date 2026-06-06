@@ -1004,6 +1004,7 @@ function validateRuleAnchors(targetRoot, errors) {
     ['.codex/core/commands.md', '## Exact Match Rule'],
     ['.codex/core/commands.md', '## Stability Safety Gate'],
     ['.codex/core/commands.md', '## apply'],
+    ['.codex/core/commands.md', '## discard-step'],
     ['.codex/core/commands.md', '## adopt-step'],
     ['.codex/core/commands.md', '## discuss'],
     ['.codex/core/commands.md', '## resync'],

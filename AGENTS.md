@@ -81,7 +81,7 @@ Commands are valid only when the entire user prompt exactly matches a command fo
 
 In Strict Mode, Codex may make factual or technical conclusions only from project code, project files, dependency code, command output, and user-provided context that are available in the current session. If the available context is insufficient to support a conclusion, Codex must stop that line of reasoning, say what context is missing, and wait for the user to provide it or allow a way to inspect it. User-provided context may be used, but Codex must not present it as independently verified unless it can verify it from accessible context.
 
-Before creating a new active step, continuing an active step, running `apply`, or running `adopt-step`, Codex must apply the stability safety gate defined in `.codex/core/commands.md`.
+Before creating a new active step, continuing an active step, running `apply`, running `discard-step`, or running `adopt-step`, Codex must apply the stability safety gate defined in `.codex/core/commands.md`.
 
 Before creating a new active step, Codex must pass the sync gate defined in `.codex/core/commands.md` and must not be in active discussion mode.
 
@@ -91,9 +91,11 @@ Pre-existing project changes block new normal steps. They may be converted into 
 
 During a normal active step, before `apply`, Codex must not modify project files. Before `apply`, Codex may update `.codex/current-step.md` only to create or maintain active step state, decisions, open questions, and working notes.
 
-This normal-step pre-apply restriction does not block standalone workflow commands that are allowed to update workflow runtime state before project execution, including `strict:true`, `strict:false`, `discuss`, `discuss:close`, and `resync`. These actions must still follow their command-specific rules and must not modify project code unless their rules explicitly allow it.
+This normal-step pre-apply restriction does not block standalone workflow commands that are allowed to update workflow state before project execution, including `strict:true`, `strict:false`, `discuss`, `discuss:close`, `discard-step`, and `resync`. These actions must still follow their command-specific rules and must not modify project code unless their rules explicitly allow it.
 
 `apply` is the normal execution command. It must follow `.codex/core/commands.md`, `.codex/core/commit-rules.md`, `.codex/core/after-step.md`, and `.codex/core/step-report-rules.md`.
+
+`discard-step` is the active-step abandonment command. It must follow `.codex/core/commands.md`, may update only `.codex/current-step.md`, must not create completed-step metadata or commits, and must refuse to run when project changes other than active-step metadata and transient runtime files are present.
 
 `adopt-step "title"` is the manual-diff adoption command. It must follow `.codex/core/commands.md`, `.codex/core/commit-rules.md`, `.codex/core/after-step.md`, and `.codex/core/step-report-rules.md`.
 
