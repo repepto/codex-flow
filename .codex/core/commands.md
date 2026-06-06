@@ -20,6 +20,8 @@ The `codex-flow` terminal CLI may provide internal machine-check helpers such as
 codex-flow internal parse-command --prompt <prompt>
 codex-flow internal validate-state
 codex-flow internal planning-context
+codex-flow internal ask-context --question <question>
+codex-flow internal footer [--compact]
 codex-flow internal next-step-id
 codex-flow internal commit-plan
 codex-flow internal preflight apply
@@ -44,6 +46,111 @@ These internal helpers are not Codex chat workflow commands. A user prompt that 
 When the matching `codex-flow internal` helper is available in the environment, Codex must prefer it for binary workflow invariants before making state-changing decisions, including command parsing, sync gates, apply preflight, adopt-step preflight and finalization, stability-sensitive diff checks, resync clean-tree gates, next step id calculation, workflow state validation, normal-flow state transitions, and commit-scope planning.
 
 If an internal helper is unavailable or cannot run, Codex must fall back to the rule files in `AGENTS.md` and `.codex/core/`, state that the machine helper was unavailable when that matters to the decision, and stop rather than guessing when the rule-file-only result is ambiguous.
+
+## Workflow State Footer
+
+Codex must append a workflow state footer after the main response body for workflow-related responses, including:
+
+- `help`;
+- `status`;
+- `ask:<question>`;
+- `goal:<description>`;
+- `apply`;
+- `discard-step`;
+- `adopt-step "title"`;
+- `resync`;
+- `check`;
+- `check:deep`;
+- `details`;
+- `details:<id>`;
+- `compare`;
+- `compare:<branch-name>`;
+- command-blocked, command-failed, and command-success responses.
+
+The footer is read-only. Generating it must not create an active step, update state, modify files, create reports, create records, create commits, run `apply`, run `adopt-step`, run `discard-step`, run `resync`, or run project verification commands.
+
+When the internal helper `codex-flow internal footer` is available, Codex must prefer it for the footer state and rendered footer. For long responses such as `help`, `details`, or long `ask:<question>` answers, Codex may use `codex-flow internal footer --compact`.
+
+The footer must reflect the actual workflow state and must not invent state, available commands, blocked commands, or a recommended next command.
+
+The full footer must use this shape:
+
+```text
+────────────────────
+
+Workflow State
+
+Active Step:
+
+<Step N (title), or none>
+
+Goal:
+
+<goal text, or none>
+
+State:
+
+Strict Mode: <true|false>
+Discussion Mode: <none|active>
+Git Tree: <clean|dirty|unknown, optionally with an active-step metadata note>
+Step Base: <none|current|stale|unknown>
+
+Recommended Next Command:
+
+<command, or none>
+
+Available Next Commands:
+
+<only when no single recommended command exists and several next actions are valid>
+
+Available Commands:
+
+<current valid commands, or none>
+
+Blocked Commands:
+
+<currently blocked commands, or none>
+```
+
+The compact footer must preserve the same meaning in a shorter shape:
+
+```text
+────────────────────
+
+State:
+
+Active Step: <Step N, or none>
+Goal: <goal text, or none>
+Strict: <true|false>
+Discussion: <none|active>
+Git Tree: <clean|dirty|unknown, optionally with an active-step metadata note>
+Step Base: <none|current|stale|unknown>
+
+Next:
+
+<command, or none>
+
+Available:
+
+<current valid commands, or none>
+
+Blocked:
+
+<currently blocked commands, or none>
+```
+
+If no active step exists, the footer must show `Active Step: none`. If no goal exists, it must show `Goal: none`. If discussion mode is inactive, it must show `Discussion Mode: none` in the full footer or `Discussion: none` in compact mode.
+
+Recommended next command is state-derived:
+
+- if discussion mode is active, recommend `discuss:close`;
+- if an active step exists and `apply` is currently allowed, recommend `apply`;
+- if an active step exists and `apply` is blocked but `discard-step` is currently allowed, recommend `discard-step`;
+- if no active step exists and sync state needs initialization or reconciliation while `resync` is allowed, recommend `resync`;
+- if no active step exists, the start-step gate passes, and `.codex/next-step.md` contains a substantive recommendation, recommend `ok`;
+- otherwise show `Recommended Next Command: none` and include `Available Next Commands` only when several valid next actions exist.
+
+Read-only commands, including `ask:<question>`, must remain available in the footer even when state-changing workflow commands are blocked.
 
 ## strict
 
@@ -105,6 +212,47 @@ Behavior:
 If `.codex/next-step.md` has no substantive recommendation yet, `ok` must not create an active step. Codex must say that no recommendation has been recorded yet and recommend that the user explicitly provide the next task prompt or run `discuss` to decide one.
 
 When the internal helper `codex-flow internal state start-recommended-step` is available, Codex must prefer it to parse `.codex/next-step.md`, apply the start-step gate, and create the active step.
+
+## ask
+
+Format:
+
+```text
+ask:<question>
+```
+
+`question` must not be empty after trimming whitespace and must not contain line breaks.
+
+Examples:
+
+```text
+ask:Why is apply blocked?
+ask:What exactly will be committed by apply?
+ask:Is discard-step the correct action here?
+ask:What assumptions are you making about the Binance environment?
+ask:What risks do you see in the current approach?
+```
+
+Behavior:
+
+- valid only as a standalone command received while Codex is waiting for user input;
+- always allowed, including while an active step exists, a stale-base step exists, `apply` is blocked, `goal` is blocked, `discuss` is blocked, or Strict Mode is enabled;
+- is a single-shot read-only question, not discussion mode;
+- after answering, returns to the exact same workflow state as before;
+- may inspect project files, dependency files, workflow state, git history, current step, records, goal, context, history, configuration, and command preflight results;
+- must not create an active step;
+- must not create records;
+- must not create reports;
+- must not create commits;
+- must not modify project files;
+- must not modify workflow files;
+- must not update `.codex/state.md` or any other workflow state;
+- must not run `apply`, `adopt-step`, `discard-step`, or `resync`;
+- must not require leaving, completing, or discarding an active step.
+
+Before answering `ask:<question>`, Codex may run read-only inspection commands and may use the internal helper `codex-flow internal ask-context --question <question>` when available. Codex must not run commands likely to mutate the project or workflow workspace.
+
+Strict Mode remains in effect during `ask`. If the available read-only context is insufficient to answer, Codex must say what context is missing rather than guessing.
 
 ## goal
 
@@ -230,7 +378,7 @@ Discussion mode is active.
 Close discussion with discuss:close before running this command.
 ```
 
-Read-only commands `help`, `status`, `compare`, `check`, `check:deep`, `details`, `details:<id>`, and `ls-steps:<n>` may run while discussion mode is active.
+Read-only commands `ask:<question>`, `help`, `status`, `compare`, `check`, `check:deep`, `details`, `details:<id>`, and `ls-steps:<n>` may run while discussion mode is active.
 
 Before proposing solutions, plans, tasks, or implementation approaches, Codex must read planning context from `.codex/goal.md` when it exists, `.codex/context.md`, and `.codex/history.md`. If the internal helper `codex-flow internal planning-context` is available, Codex must prefer it for this context load.
 
@@ -616,14 +764,17 @@ Behavior:
 The output must include:
 
 - current workflow state summary;
+- `ask:<question>` as an always-available read-only escape hatch;
 - required next action when the workflow is blocked, uninitialized, dirty, ambiguous, in discussion mode, or inside an active step;
 - available actions that are valid in the current state;
 - blocked actions and the reason they are blocked;
 - a brief explanation of what each available action will do.
+- a compact workflow state footer after the main help body.
 
 When no active step exists, discussion mode is inactive, sync state is initialized, and the git tree is clean, `help` should explain at least these available paths:
 
 - send a normal task prompt to create a new active step;
+- run `ask:<question>` to ask a read-only single-shot question without changing workflow state;
 - run `ok` to create a new active step from the recommended next step when `.codex/next-step.md` contains a substantive recommendation;
 - run `goal:<description>` to create or replace the long-term project goal in `.codex/goal.md`;
 - run `discuss` to enter discussion mode before choosing executable work;
@@ -646,6 +797,7 @@ When the git tree is dirty before a normal step starts, `help` must distinguish:
 
 When an active step exists, `help` must explain that a new step, `goal:<description>`, `discuss`, and `adopt-step` are blocked until the current step is completed or resolved. It must list valid current-step actions such as:
 
+- use `ask:<question>` to ask read-only questions without leaving or modifying the active step;
 - continue discussing or refining the active step;
 - use `record:<id> "description"` to store a decision;
 - use `forget:<id>` or `forget` to remove recorded decisions;
@@ -655,6 +807,7 @@ When an active step exists, `help` must explain that a new step, `goal:<descript
 
 When discussion mode is active, `help` must explain that normal prompts remain discussion prompts and do not create steps. It must list:
 
+- use `ask:<question>` for a single read-only question without changing discussion mode;
 - ask questions or request analysis without changing the main workspace;
 - use `discuss:close` before starting executable work;
 - use allowed read-only commands;

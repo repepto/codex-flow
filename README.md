@@ -72,6 +72,7 @@ They cover:
 - removed-command detection for commands such as `commit`, `apply-only`, `run-steps`, `run-steps:auto`, and `abort-steps`;
 - normal-step sync gate evaluation;
 - project-goal validation and planning-context loading;
+- read-only workflow state footer generation for workflow command responses;
 - workflow state validation for `.codex/state.md`, `.codex/current-step.md`, history, reports, and next step id calculation;
 - `apply` preflight validation for active step id, base revision, base branch, and discussion-mode blockers;
 - commit-plan validation that excludes transient runtime state and blocks active `.codex/current-step.md` from commit scope;
@@ -85,6 +86,8 @@ They cover:
 codex-flow internal parse-command --prompt 'apply'
 codex-flow internal validate-state
 codex-flow internal planning-context
+codex-flow internal ask-context --question 'Why is apply blocked?'
+codex-flow internal footer --compact
 codex-flow internal next-step-id
 codex-flow internal commit-plan --require-commit-worthy
 codex-flow internal preflight apply
@@ -189,6 +192,7 @@ For multiple related tasks that should land in one commit, describe them in one 
 help
 status
 ok
+ask:<question>
 goal:<description>
 discuss
 discuss:close
@@ -214,10 +218,18 @@ Commands must match exactly. Extra text means it is treated as a normal prompt, 
 
 Use `help` at any point for state-aware guidance. It is read-only and explains what actions are currently available, what actions are blocked, and what the next required step is when the flow is uninitialized, dirty, in discussion mode, or inside an active step.
 
+## Workflow State Footer
+
+Workflow-related Codex chat responses append a read-only footer after the main answer. It shows the active step, active goal, Strict Mode, Discussion Mode, git/workflow cleanliness, active-step base status, the recommended next command, currently available commands, and currently blocked commands.
+
+Long responses such as `help`, `details`, and long `ask:<question>` answers may use compact mode. Footer generation never creates steps, records, reports, commits, state updates, or file changes.
+
 ## Important Behavior
 
 - At session start, after reading workflow state, Codex reports the immediate required action when the flow is blocked, dirty, uninitialized, in discussion mode, or inside an active step. If nothing blocks normal work, it shows the recommended next step from `.codex/next-step.md` and waits for an explicit user task or `ok` to accept the recommendation.
+- Workflow command responses end with the Workflow State Footer so the operator can see the current state, recommended next command, available commands, and blocked commands without asking a separate status question.
 - `ok` starts a new active step from `.codex/next-step.md` when the normal start-step gate passes and the recommendation is substantive.
+- `ask:<question>` is an always-available read-only escape hatch for single-shot questions. It can inspect state and files, but it does not create steps, records, reports, commits, state updates, or mode changes.
 - `goal:<description>` creates or replaces `.codex/goal.md` as long-term project context. It is not a step, does not authorize source changes, creates a goal commit when the file changes, and leaves the git tree clean.
 - During a normal active step, before `apply`, Codex must not edit project files. It may only maintain `.codex/current-step.md`; standalone runtime commands such as `resync`, `strict:true`, and `strict:false` may update workflow state as defined by the rule files.
 - `discard-step` abandons the active step without completing it. It rewrites `.codex/current-step.md` back to inactive state, creates a cleanup commit when needed so the git tree is clean, and is intended for stale or intentionally cancelled active steps.
@@ -325,7 +337,8 @@ The test suite covers:
 - downstream `update` preserving project-owned state;
 - downstream `update --commit` validation, clean-tree gate, no-op handling, and commit creation;
 - invalid override rejection;
-- sync-gate behavior for `resync`, normal steps, discussion mode, `discard-step`, and `adopt-step`.
+- sync-gate behavior for `resync`, normal steps, discussion mode, `discard-step`, and `adopt-step`;
+- workflow state footer rendering, compact mode, read-only guarantees, active-step/goal state, blockers, and flow transitions.
 
 Publish when the package metadata, version, and license are ready:
 

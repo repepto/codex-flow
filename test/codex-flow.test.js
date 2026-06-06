@@ -32,6 +32,7 @@ Object.assign(process.env, {
 
 const {
   buildCommitPlan,
+  buildWorkflowStateFooter,
   calculateNextStepId,
   COMMAND_FORMATS,
   REMOVED_COMMANDS,
@@ -48,6 +49,7 @@ const {
   extractReadmeCommandList,
   finalizeAdoptStep,
   finalizeStep,
+  inspectAskContext,
   normalizeCommandFormat,
   parseWorkflowCommand,
   readPlanningContext,
@@ -67,6 +69,7 @@ test('exact workflow command parser accepts only supported exact prompts', () =>
     'strict:true',
     'strict:false',
     'ok',
+    'ask:Why is apply blocked?',
     'goal:Build a maintainable slot platform that can support dozens of games.',
     'discuss',
     'discuss:close',
@@ -95,6 +98,9 @@ test('exact workflow command parser accepts only supported exact prompts', () =>
   const invalidPrompts = [
     ' status',
     'OK',
+    'ask:',
+    'ask:   ',
+    'ask is apply blocked?',
     'goal:',
     'goal:   ',
     'goal\n:Bad',
@@ -422,6 +428,20 @@ test('internal CLI exposes JSON guardrails without changing public help', () => 
   assert.equal(planningContext.status, 0, planningContext.stderr);
   assert.equal(JSON.parse(planningContext.stdout).details.goal.exists, false);
 
+  const askContext = runCli(['internal', 'ask-context', '--question', 'Why is apply blocked?', '--target', target]);
+  assert.equal(askContext.status, 0, askContext.stdout + askContext.stderr);
+  assert.equal(JSON.parse(askContext.stdout).details.question, 'Why is apply blocked?');
+  assert.equal(JSON.parse(askContext.stdout).details.readOnly, true);
+
+  const footer = runCli(['internal', 'footer', '--target', target]);
+  assert.equal(footer.status, 0, footer.stdout + footer.stderr);
+  assert.match(JSON.parse(footer.stdout).details.footer, /Workflow State/);
+  assert.equal(JSON.parse(footer.stdout).details.readOnly, true);
+
+  const compactFooter = runCli(['internal', 'footer', '--compact', '--target', target]);
+  assert.equal(compactFooter.status, 0, compactFooter.stdout + compactFooter.stderr);
+  assert.match(JSON.parse(compactFooter.stdout).details.footer, /^────────────────────\n\nState:/);
+
   const next = runCli(['internal', 'next-step-id', '--target', target]);
   assert.equal(next.status, 0, next.stderr);
   assert.equal(JSON.parse(next.stdout).nextStepId, 1);
@@ -481,6 +501,53 @@ Use existing settings patterns.
   assert.match(currentStep, /Status: active/);
   assert.match(currentStep, /Task:\nAdd compact mode setting\.\n\nUse existing settings patterns\./);
   assert.equal(run('git', ['status', '--short'], { cwd: target }).stdout, ' M .codex/current-step.md\n');
+});
+
+test('ask is read-only on clean, blocked, active, and stale-base workflow states', () => {
+  const cleanTarget = makeTempDir('codex-flow-ask-clean-');
+  initGit(cleanTarget);
+  assert.equal(runCli(['init', '--target', cleanTarget]).status, 0);
+  commitVersionedInstall(cleanTarget);
+  assert.equal(runCli(['internal', 'state', 'resync', '--target', cleanTarget]).status, 0);
+  const cleanBefore = readWorkflowSnapshot(cleanTarget);
+
+  let ask = inspectAskContext(cleanTarget, 'Why is apply blocked?');
+  assert.equal(ask.ok, true, ask.errors.join('\n'));
+  assert.equal(ask.details.readOnly, true);
+  assert.match(ask.details.applyGate.errors.join('\n'), /No active step/);
+  assert.match(ask.details.currentStep.content, /No active step/);
+  assert.deepEqual(readWorkflowSnapshot(cleanTarget), cleanBefore);
+  assert.equal(run('git', ['status', '--short'], { cwd: cleanTarget }).stdout.trim(), '');
+
+  const activeTarget = makeTempDir('codex-flow-ask-active-');
+  initGit(activeTarget);
+  assert.equal(runCli(['init', '--target', activeTarget]).status, 0);
+  commitVersionedInstall(activeTarget);
+  assert.equal(runCli(['internal', 'state', 'resync', '--target', activeTarget]).status, 0);
+  assert.equal(startStep(activeTarget, 'Investigate active work').ok, true);
+  assert.equal(recordDecision(activeTarget, 'risk-model', 'Preserve the existing risk controls.').ok, true);
+  const activeBefore = readWorkflowSnapshot(activeTarget);
+
+  ask = inspectAskContext(activeTarget, 'What assumptions are you making?');
+  assert.equal(ask.ok, true, ask.errors.join('\n'));
+  assert.equal(ask.details.currentStep.active, true);
+  assert.match(ask.details.currentStep.content, /risk-model/);
+  assert.deepEqual(readWorkflowSnapshot(activeTarget), activeBefore);
+
+  const staleTarget = makeTempDir('codex-flow-ask-stale-');
+  initGit(staleTarget);
+  assert.equal(runCli(['init', '--target', staleTarget]).status, 0);
+  commitVersionedInstall(staleTarget);
+  assert.equal(runCli(['internal', 'state', 'resync', '--target', staleTarget]).status, 0);
+  assert.equal(startStep(staleTarget, 'Stale-base active work').ok, true);
+  assert.equal(run('git', ['commit', '--allow-empty', '-m', 'chore: external commit'], { cwd: staleTarget }).status, 0);
+  const staleBefore = readWorkflowSnapshot(staleTarget);
+
+  ask = inspectAskContext(staleTarget, 'Why is apply blocked?');
+  assert.equal(ask.ok, true, ask.errors.join('\n'));
+  assert.equal(ask.details.currentStep.active, true);
+  assert.match(ask.details.applyGate.errors.join('\n'), /Current git revision does not match the active step base revision/);
+  assert.deepEqual(readWorkflowSnapshot(staleTarget), staleBefore);
 });
 
 test('goal command finalizes project goal context without creating a step', () => {
@@ -564,6 +631,133 @@ test('goal command cannot bypass active-step or dirty-tree workflow rules', () =
   assert.match(result.errors.join('\n'), /Git working tree must be clean/);
   assert.equal(fs.existsSync(path.join(dirtyTarget, '.codex/goal.md')), false);
   assert.equal(evaluateGoalGate(dirtyTarget, 'Valid goal').ok, false);
+});
+
+test('workflow state footer reports state, goal, commands, and compact form without mutation', () => {
+  const target = makeTempDir('codex-flow-footer-state-');
+  initGit(target);
+  assert.equal(runCli(['init', '--target', target]).status, 0);
+  commitVersionedInstall(target);
+  assert.equal(runCli(['internal', 'state', 'resync', '--target', target]).status, 0);
+
+  let footer = buildWorkflowStateFooter(target);
+  assert.equal(footer.ok, true, footer.errors.join('\n'));
+  assert.equal(footer.details.readOnly, true);
+  assert.match(footer.details.footer, /^────────────────────\n\nWorkflow State/);
+  assert.match(footer.details.footer, /Active Step:\n\nnone/);
+  assert.match(footer.details.footer, /Goal:\n\nnone/);
+  assert.match(footer.details.footer, /Recommended Next Command:\n\nnone/);
+  assert.match(footer.details.footer, /Available Next Commands:\n\nnormal task prompt/);
+  assert.ok(footer.details.commands.blockedCommands.includes('apply'));
+
+  const cleanBefore = readWorkflowSnapshot(target);
+  assert.equal(buildWorkflowStateFooter(target).details.readOnly, true);
+  assert.deepEqual(readWorkflowSnapshot(target), cleanBefore);
+
+  let goal = setGoal(target, 'Make the crypto bot capable of earning money in live trading.', {
+    updatedDate: '2026-06-06'
+  });
+  assert.equal(goal.ok, true, goal.errors.join('\n'));
+  footer = buildWorkflowStateFooter(target);
+  assert.match(footer.details.footer, /Goal:\n\nMake the crypto bot capable of earning money in live trading\./);
+
+  goal = setGoal(target, 'Build a maintainable slot platform that can support dozens of games.', {
+    updatedDate: '2026-06-06'
+  });
+  assert.equal(goal.ok, true, goal.errors.join('\n'));
+  footer = buildWorkflowStateFooter(target);
+  assert.match(footer.details.footer, /Goal:\n\nBuild a maintainable slot platform that can support dozens of games\./);
+  assert.doesNotMatch(footer.details.footer, /crypto bot/);
+
+  assert.equal(startStep(target, 'Investigate footer state').ok, true);
+  const activeBefore = readWorkflowSnapshot(target);
+  footer = buildWorkflowStateFooter(target);
+  assert.match(footer.details.footer, /Active Step:\n\nStep 1 \(Investigate footer state\)/);
+  assert.match(footer.details.footer, /Step Base: current/);
+  assert.equal(footer.details.commands.recommendedNextCommand, 'apply');
+  assert.ok(footer.details.commands.availableCommands.includes('discard-step'));
+  assert.ok(footer.details.commands.blockedCommands.includes('goal:<description>'));
+  assert.ok(footer.details.commands.blockedCommands.includes('adopt-step "title"'));
+  assert.deepEqual(readWorkflowSnapshot(target), activeBefore);
+
+  const compact = buildWorkflowStateFooter(target, { compact: true });
+  assert.equal(compact.ok, true, compact.errors.join('\n'));
+  assert.match(compact.details.footer, /^────────────────────\n\nState:/);
+  assert.doesNotMatch(compact.details.footer, /Workflow State/);
+  assert.match(compact.details.footer, /Active Step: Step 1/);
+  assert.match(compact.details.footer, /Next:\n\napply/);
+});
+
+test('workflow state footer stays accurate across resync, stale, discard, apply, and adopt flows', () => {
+  const target = makeTempDir('codex-flow-footer-flows-');
+  initGit(target);
+  assert.equal(runCli(['init', '--target', target]).status, 0);
+  commitVersionedInstall(target);
+
+  let footer = buildWorkflowStateFooter(target);
+  assert.equal(footer.details.commands.recommendedNextCommand, 'resync');
+  assert.match(footer.details.footer, /Recommended Next Command:\n\nresync/);
+
+  assert.equal(resyncState(target).ok, true);
+  footer = buildWorkflowStateFooter(target);
+  assert.match(footer.details.footer, /Active Step:\n\nnone/);
+  assert.match(footer.details.footer, /Git Tree: clean/);
+  assert.ok(footer.details.commands.availableCommands.includes('resync'));
+
+  assert.equal(startStep(target, 'Stale-base active work').ok, true);
+  assert.equal(run('git', ['commit', '--allow-empty', '-m', 'chore: external commit'], { cwd: target }).status, 0);
+  const staleBefore = readWorkflowSnapshot(target);
+  footer = buildWorkflowStateFooter(target);
+  assert.equal(footer.details.stepBase, 'stale');
+  assert.equal(footer.details.commands.recommendedNextCommand, 'discard-step');
+  assert.ok(footer.details.commands.blockedCommands.includes('apply'));
+  assert.deepEqual(readWorkflowSnapshot(target), staleBefore);
+
+  let discarded = discardActiveStep(target);
+  assert.equal(discarded.ok, true, discarded.errors.join('\n'));
+  footer = buildWorkflowStateFooter(target);
+  assert.match(footer.details.footer, /Active Step:\n\nnone/);
+  assert.equal(footer.details.gitTree.status, 'clean');
+  assert.ok(footer.details.commands.availableCommands.includes('resync'));
+  assert.equal(resyncState(target).ok, true);
+
+  assert.equal(startStep(target, 'Add payload for apply footer').ok, true);
+  fs.writeFileSync(path.join(target, 'payload.txt'), 'payload\n', 'utf8');
+  footer = buildWorkflowStateFooter(target);
+  assert.equal(footer.details.commands.recommendedNextCommand, 'apply');
+  assert.equal(footer.details.gitTree.status, 'dirty');
+  assert.deepEqual(footer.details.gitTree.dirtyPaths, ['payload.txt']);
+  assert.ok(footer.details.commands.blockedCommands.includes('discard-step'));
+
+  const applied = finalizeStep(target, {
+    title: 'Add payload for apply footer',
+    summary: 'Added payload fixture.',
+    implementation: 'Added payload.txt and completed the step.',
+    nextStep: 'Review payload fixture usage before broadening it.',
+    message: 'chore: add payload footer fixture'
+  });
+  assert.equal(applied.ok, true, applied.errors.join('\n'));
+  footer = buildWorkflowStateFooter(target);
+  assert.match(footer.details.footer, /Active Step:\n\nnone/);
+  assert.equal(footer.details.gitTree.status, 'clean');
+  assert.equal(footer.details.commands.recommendedNextCommand, 'ok');
+
+  fs.writeFileSync(path.join(target, 'manual.txt'), 'manual\n', 'utf8');
+  footer = buildWorkflowStateFooter(target);
+  assert.ok(footer.details.commands.availableCommands.includes('adopt-step "title"'));
+  assert.ok(footer.details.commands.blockedCommands.includes('resync'));
+  assert.ok(footer.details.commands.availableNextCommands.includes('adopt-step "title"'));
+
+  const adopted = finalizeAdoptStep(target, {
+    title: 'Adopt manual footer fixture',
+    nextStep: 'Review the adopted manual footer fixture.',
+    message: 'chore: adopt manual footer fixture'
+  });
+  assert.equal(adopted.ok, true, adopted.errors.join('\n'));
+  footer = buildWorkflowStateFooter(target);
+  assert.match(footer.details.footer, /Active Step:\n\nnone/);
+  assert.equal(footer.details.gitTree.status, 'clean');
+  assert.equal(footer.details.commands.recommendedNextCommand, 'ok');
 });
 
 test('internal normal flow runs resync, task, record, apply finalization, report, and clean state', () => {
@@ -1150,4 +1344,23 @@ none
 Working Notes:
 none
 `, 'utf8');
+}
+
+function readWorkflowSnapshot(target) {
+  const optionalFile = (relativePath) => {
+    const fullPath = path.join(target, relativePath);
+    return fs.existsSync(fullPath) ? fs.readFileSync(fullPath, 'utf8') : null;
+  };
+
+  return {
+    head: run('git', ['rev-parse', 'HEAD'], { cwd: target }).stdout.trim(),
+    status: run('git', ['status', '--short'], { cwd: target }).stdout,
+    currentStep: optionalFile('.codex/current-step.md'),
+    state: optionalFile('.codex/state.md'),
+    goal: optionalFile('.codex/goal.md'),
+    history: optionalFile('.codex/history.md'),
+    reports: fs.existsSync(path.join(target, '.codex/reports'))
+      ? fs.readdirSync(path.join(target, '.codex/reports')).sort()
+      : null
+  };
 }

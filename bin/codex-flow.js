@@ -9,6 +9,7 @@ const {
   COMMAND_FORMATS,
   REMOVED_COMMANDS,
   buildCommitPlan,
+  buildWorkflowStateFooter,
   calculateNextStepId,
   discardActiveStep,
   evaluateGoalGate,
@@ -22,6 +23,7 @@ const {
   extractReadmeCommandList,
   finalizeAdoptStep,
   finalizeStep,
+  inspectAskContext,
   normalizeCommandFormat,
   parseWorkflowCommand,
   readPlanningContext,
@@ -255,12 +257,14 @@ function parseInternalArgs(args) {
     title: null,
     id: null,
     description: null,
+    question: null,
     summary: null,
     implementation: null,
     message: null,
     nextStep: null,
     checkCommands: [],
-    requireCommitWorthy: false
+    requireCommitWorthy: false,
+    compact: false
   };
   const commandArgs = [];
 
@@ -345,6 +349,21 @@ function parseInternalArgs(args) {
       continue;
     }
 
+    if (arg === '--question') {
+      const value = args[i + 1];
+      if (value === undefined) {
+        throw new CliError('--question requires a value.', 2);
+      }
+      options.question = value;
+      i += 1;
+      continue;
+    }
+
+    if (arg.startsWith('--question=')) {
+      options.question = arg.slice('--question='.length);
+      continue;
+    }
+
     if (arg === '--summary') {
       const value = args[i + 1];
       if (value === undefined) {
@@ -425,6 +444,11 @@ function parseInternalArgs(args) {
       continue;
     }
 
+    if (arg === '--compact') {
+      options.compact = true;
+      continue;
+    }
+
     if (arg.startsWith('--')) {
       throw new CliError(`Unknown internal option: ${arg}`, 2);
     }
@@ -462,6 +486,19 @@ function runInternalCommand({ commandArgs, options }) {
 
   if (group === 'planning-context') {
     return printInternalResult(readPlanningContext(targetRoot));
+  }
+
+  if (group === 'ask-context') {
+    if (options.question === null) {
+      throw new CliError('internal ask-context requires --question.', 2);
+    }
+    return printInternalResult(inspectAskContext(targetRoot, options.question));
+  }
+
+  if (group === 'footer') {
+    return printInternalResult(buildWorkflowStateFooter(targetRoot, {
+      compact: options.compact
+    }));
   }
 
   if (group === 'next-step-id') {
@@ -586,7 +623,7 @@ function runInternalCommand({ commandArgs, options }) {
   }
 
   throw new CliError(
-    'Unknown internal command. Supported: parse-command, validate-state, planning-context, next-step-id, commit-plan, preflight apply, state resync|start-step|start-recommended-step|set-goal|record|discard-step|finalize-step|finalize-adopt-step, gate start-step|goal|apply|adopt-step|resync|stability.',
+    'Unknown internal command. Supported: parse-command, validate-state, planning-context, ask-context, footer, next-step-id, commit-plan, preflight apply, state resync|start-step|start-recommended-step|set-goal|record|discard-step|finalize-step|finalize-adopt-step, gate start-step|goal|apply|adopt-step|resync|stability.',
     2
   );
 }
