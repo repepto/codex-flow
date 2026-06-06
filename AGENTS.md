@@ -82,7 +82,7 @@ If no such blocker exists, the report must show the recommended next step from `
 
 If `.codex/next-step.md` has no substantive recommendation yet, Codex must say that no recommendation has been recorded yet and recommend that the user explicitly provide the next task prompt or run `discuss` to decide one.
 
-Showing the recommended next step must not create, start, or execute that step. Codex must wait for the user to explicitly request the next task.
+Showing the recommended next step must not create, start, or execute that step. Codex must wait for the user to explicitly request the next task, either by sending a task prompt or by sending `ok` to accept the recommended next step.
 
 ## Rule And Data Separation
 

@@ -25,6 +25,7 @@ const {
   parseWorkflowCommand,
   recordDecision,
   resyncState,
+  startRecommendedStep,
   startStep,
   validateWorkflowState
 } = require('../lib/workflow');
@@ -491,6 +492,10 @@ function runInternalCommand({ commandArgs, options }) {
       return printInternalResult(startStep(targetRoot, options.prompt));
     }
 
+    if (action === 'start-recommended-step') {
+      return printInternalResult(startRecommendedStep(targetRoot));
+    }
+
     if (action === 'record') {
       if (options.id === null) {
         throw new CliError('internal state record requires --id.', 2);
@@ -559,7 +564,7 @@ function runInternalCommand({ commandArgs, options }) {
   }
 
   throw new CliError(
-    'Unknown internal command. Supported: parse-command, validate-state, next-step-id, commit-plan, preflight apply, state resync|start-step|record|discard-step|finalize-step|finalize-adopt-step, gate start-step|apply|adopt-step|resync|stability.',
+    'Unknown internal command. Supported: parse-command, validate-state, next-step-id, commit-plan, preflight apply, state resync|start-step|start-recommended-step|record|discard-step|finalize-step|finalize-adopt-step, gate start-step|apply|adopt-step|resync|stability.',
     2
   );
 }

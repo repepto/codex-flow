@@ -51,6 +51,7 @@ const {
   parseWorkflowCommand,
   recordDecision,
   resyncState,
+  startRecommendedStep,
   startStep,
   validateWorkflowState
 } = require('../lib/workflow');
@@ -62,6 +63,7 @@ test('exact workflow command parser accepts only supported exact prompts', () =>
   const validPrompts = [
     'strict:true',
     'strict:false',
+    'ok',
     'discuss',
     'discuss:close',
     'record:api-v2 "Use the v2 endpoint."',
@@ -88,6 +90,7 @@ test('exact workflow command parser accepts only supported exact prompts', () =>
 
   const invalidPrompts = [
     ' status',
+    'OK',
     'help now',
     'status now',
     'record:Api "Uppercase id"',
@@ -416,6 +419,45 @@ test('internal CLI exposes JSON guardrails without changing public help', () => 
   const adoptGate = runCli(['internal', 'gate', 'adopt-step', '--title', 'Adopt manual diff', '--target', target]);
   assert.equal(adoptGate.status, 0, adoptGate.stdout + adoptGate.stderr);
   assert.equal(JSON.parse(adoptGate.stdout).ok, true);
+});
+
+test('ok starts an active step from the recommended next step', () => {
+  const target = makeTempDir('codex-flow-ok-command-');
+  initGit(target);
+  assert.equal(runCli(['init', '--target', target]).status, 0);
+  commitVersionedInstall(target);
+  assert.equal(runCli(['internal', 'state', 'resync', '--target', target]).status, 0);
+
+  const missingRecommendation = startRecommendedStep(target);
+  assert.equal(missingRecommendation.ok, false);
+  assert.match(missingRecommendation.errors.join('\n'), /No recommended next step/);
+  assert.match(fs.readFileSync(path.join(target, '.codex/current-step.md'), 'utf8'), /No active step/);
+  assert.equal(run('git', ['status', '--short'], { cwd: target }).stdout.trim(), '');
+
+  fs.writeFileSync(path.join(target, '.codex/next-step.md'), `# Next Step
+
+## Recommended Step
+
+Add compact mode setting.
+
+Use existing settings patterns.
+`, 'utf8');
+  assert.equal(run('git', ['add', '--', '.codex/next-step.md'], { cwd: target }).status, 0);
+  assert.equal(run('git', ['commit', '-m', 'chore: seed recommended next step'], { cwd: target }).status, 0);
+  assert.equal(runCli(['internal', 'state', 'resync', '--target', target]).status, 0);
+
+  const result = runCli(['internal', 'state', 'start-recommended-step', '--target', target]);
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  const started = JSON.parse(result.stdout);
+  assert.equal(started.details.stepId, 1);
+  assert.equal(
+    started.details.recommendedStep,
+    'Add compact mode setting.\n\nUse existing settings patterns.'
+  );
+  const currentStep = fs.readFileSync(path.join(target, '.codex/current-step.md'), 'utf8');
+  assert.match(currentStep, /Status: active/);
+  assert.match(currentStep, /Task:\nAdd compact mode setting\.\n\nUse existing settings patterns\./);
+  assert.equal(run('git', ['status', '--short'], { cwd: target }).stdout, ' M .codex/current-step.md\n');
 });
 
 test('internal normal flow runs resync, task, record, apply finalization, report, and clean state', () => {

@@ -24,6 +24,7 @@ codex-flow internal commit-plan
 codex-flow internal preflight apply
 codex-flow internal state resync
 codex-flow internal state start-step --prompt <prompt>
+codex-flow internal state start-recommended-step
 codex-flow internal state record --id <id> --description <description>
 codex-flow internal state discard-step
 codex-flow internal state finalize-step --title <title> --next-step <recommendation>
@@ -75,6 +76,32 @@ Creating this skeleton does not initialize sync. The sync baseline remains unini
 `strict:false` disables Strict Mode and returns Codex to its default reasoning behavior.
 
 In Strict Mode, Codex may make factual or technical conclusions only from project code, project files, dependency code, command output, and user-provided context that are available in the current session. If the available context is insufficient to support a conclusion, Codex must stop that line of reasoning, say what context is missing, and wait for the user to provide it or allow a way to inspect it.
+
+## ok
+
+Format:
+
+```text
+ok
+```
+
+Behavior:
+
+- valid only as a standalone command received while Codex is waiting for user input;
+- starts a new active step from the recommended next step in `.codex/next-step.md`;
+- is allowed only when the user could otherwise send a normal task prompt to create a new active step;
+- requires no active step, discussion mode inactive, initialized matching sync state, and a clean git working tree;
+- requires `.codex/next-step.md` to contain a substantive `## Recommended Step` value;
+- treats `No recommendation yet.` as no substantive recommendation;
+- follows the same sync gate, stability safety gate, and step-start reporting requirements as a normal task prompt;
+- updates `.codex/current-step.md` with the active step state;
+- does not modify project files;
+- does not run checks;
+- does not create commits.
+
+If `.codex/next-step.md` has no substantive recommendation yet, `ok` must not create an active step. Codex must say that no recommendation has been recorded yet and recommend that the user explicitly provide the next task prompt or run `discuss` to decide one.
+
+When the internal helper `codex-flow internal state start-recommended-step` is available, Codex must prefer it to parse `.codex/next-step.md`, apply the start-step gate, and create the active step.
 
 ## Stability Safety Gate
 
@@ -548,6 +575,7 @@ The output must include:
 When no active step exists, discussion mode is inactive, sync state is initialized, and the git tree is clean, `help` should explain at least these available paths:
 
 - send a normal task prompt to create a new active step;
+- run `ok` to create a new active step from the recommended next step when `.codex/next-step.md` contains a substantive recommendation;
 - run `discuss` to enter discussion mode before choosing executable work;
 - run read-only review commands such as `status`, `check`, `check:deep`, `compare`, `details`, or `ls-steps:<n>` when useful.
 

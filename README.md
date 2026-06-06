@@ -88,6 +88,7 @@ codex-flow internal commit-plan --require-commit-worthy
 codex-flow internal preflight apply
 codex-flow internal state resync
 codex-flow internal state start-step --prompt 'Add compact mode'
+codex-flow internal state start-recommended-step
 codex-flow internal state record --id compact-mode --description 'Store the preference locally.'
 codex-flow internal state discard-step
 codex-flow internal state finalize-step --title 'Add compact mode' --next-step 'Cover compact mode persistence.'
@@ -181,6 +182,7 @@ For multiple related tasks that should land in one commit, describe them in one 
 ```text
 help
 status
+ok
 discuss
 discuss:close
 record:<id> "description"
@@ -207,7 +209,8 @@ Use `help` at any point for state-aware guidance. It is read-only and explains w
 
 ## Important Behavior
 
-- At session start, after reading workflow state, Codex reports the immediate required action when the flow is blocked, dirty, uninitialized, in discussion mode, or inside an active step. If nothing blocks normal work, it shows the recommended next step from `.codex/next-step.md` and waits for an explicit user task.
+- At session start, after reading workflow state, Codex reports the immediate required action when the flow is blocked, dirty, uninitialized, in discussion mode, or inside an active step. If nothing blocks normal work, it shows the recommended next step from `.codex/next-step.md` and waits for an explicit user task or `ok` to accept the recommendation.
+- `ok` starts a new active step from `.codex/next-step.md` when the normal start-step gate passes and the recommendation is substantive.
 - During a normal active step, before `apply`, Codex must not edit project files. It may only maintain `.codex/current-step.md`; standalone runtime commands such as `resync`, `strict:true`, and `strict:false` may update workflow state as defined by the rule files.
 - `discard-step` abandons the active step without completing it. It rewrites `.codex/current-step.md` back to inactive state, creates a cleanup commit when needed so the git tree is clean, and is intended for stale or intentionally cancelled active steps.
 - `help` is a read-only state-aware guide. It can run before `resync`, on a dirty tree, during discussion mode, and inside an active step.
