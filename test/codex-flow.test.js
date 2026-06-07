@@ -56,6 +56,7 @@ const {
   recordDecision,
   resyncState,
   setGoal,
+  setStrictMode,
   startRecommendedStep,
   startStep,
   validateWorkflowState
@@ -438,6 +439,16 @@ test('internal CLI exposes JSON guardrails without changing public help', () => 
   assert.match(JSON.parse(footer.stdout).details.footer, /Workflow State/);
   assert.equal(JSON.parse(footer.stdout).details.readOnly, true);
 
+  const strictOff = runCli(['internal', 'state', 'set-strict', '--strict', 'false', '--target', target]);
+  assert.equal(strictOff.status, 0, strictOff.stdout + strictOff.stderr);
+  assert.equal(JSON.parse(strictOff.stdout).details.strictMode, 'false');
+  assert.match(fs.readFileSync(path.join(target, '.codex/state.md'), 'utf8'), /Strict Mode: false/);
+
+  const strictOn = runCli(['internal', 'state', 'set-strict', '--strict=true', '--target', target]);
+  assert.equal(strictOn.status, 0, strictOn.stdout + strictOn.stderr);
+  assert.equal(JSON.parse(strictOn.stdout).details.strictMode, 'true');
+  assert.match(fs.readFileSync(path.join(target, '.codex/state.md'), 'utf8'), /Strict Mode: true/);
+
   const compactFooter = runCli(['internal', 'footer', '--compact', '--target', target]);
   assert.equal(compactFooter.status, 0, compactFooter.stdout + compactFooter.stderr);
   assert.match(JSON.parse(compactFooter.stdout).details.footer, /^────────────────────\n\nState:/);
@@ -462,6 +473,57 @@ test('internal CLI exposes JSON guardrails without changing public help', () => 
   const adoptGate = runCli(['internal', 'gate', 'adopt-step', '--title', 'Adopt manual diff', '--target', target]);
   assert.equal(adoptGate.status, 0, adoptGate.stdout + adoptGate.stderr);
   assert.equal(JSON.parse(adoptGate.stdout).ok, true);
+});
+
+test('strict mode helper updates only ignored runtime state and preserves sync fields', () => {
+  const target = makeTempDir('codex-flow-strict-helper-');
+  initGit(target);
+  assert.equal(runCli(['init', '--target', target]).status, 0);
+  commitVersionedInstall(target);
+  fs.rmSync(path.join(target, '.codex/state.md'));
+  const installHead = run('git', ['rev-parse', 'HEAD'], { cwd: target }).stdout.trim();
+
+  let result = setStrictMode(target, 'false');
+  assert.equal(result.ok, true, result.errors.join('\n'));
+  assert.equal(result.details.created, true);
+  assert.equal(result.details.changed, true);
+  assert.match(fs.readFileSync(path.join(target, '.codex/state.md'), 'utf8'), /Last Known Revision: none/);
+  assert.match(fs.readFileSync(path.join(target, '.codex/state.md'), 'utf8'), /Strict Mode: false/);
+  assert.equal(run('git', ['rev-parse', 'HEAD'], { cwd: target }).stdout.trim(), installHead);
+  assert.equal(run('git', ['status', '--short'], { cwd: target }).stdout.trim(), '');
+
+  assert.equal(resyncState(target).ok, true);
+  const stateAfterResync = fs.readFileSync(path.join(target, '.codex/state.md'), 'utf8');
+  assert.match(stateAfterResync, /Last Sync Source: resync/);
+  assert.match(stateAfterResync, /Strict Mode: false/);
+
+  result = setStrictMode(target, true);
+  assert.equal(result.ok, true, result.errors.join('\n'));
+  assert.equal(result.details.created, false);
+  assert.equal(result.details.changed, true);
+  const stateAfterStrict = fs.readFileSync(path.join(target, '.codex/state.md'), 'utf8');
+  assert.match(stateAfterStrict, /Last Sync Source: resync/);
+  assert.match(stateAfterStrict, /Discussion Mode: none/);
+  assert.match(stateAfterStrict, /Strict Mode: true/);
+  assert.equal(run('git', ['status', '--short'], { cwd: target }).stdout.trim(), '');
+
+  assert.equal(startStep(target, 'Active work does not block strict mode').ok, true);
+  result = setStrictMode(target, 'false');
+  assert.equal(result.ok, true, result.errors.join('\n'));
+  assert.match(fs.readFileSync(path.join(target, '.codex/current-step.md'), 'utf8'), /Status: active/);
+  assert.match(fs.readFileSync(path.join(target, '.codex/state.md'), 'utf8'), /Strict Mode: false/);
+
+  const unignoredTarget = makeTempDir('codex-flow-strict-unignored-');
+  initGit(unignoredTarget);
+  assert.equal(runCli(['init', '--target', unignoredTarget]).status, 0);
+  fs.writeFileSync(path.join(unignoredTarget, '.gitignore'), '.codex/tmp/\n', 'utf8');
+  commitVersionedInstall(unignoredTarget);
+  fs.rmSync(path.join(unignoredTarget, '.codex/state.md'));
+
+  result = setStrictMode(unignoredTarget, 'false');
+  assert.equal(result.ok, false);
+  assert.match(result.errors.join('\n'), /must be ignored runtime state/);
+  assert.equal(fs.existsSync(path.join(unignoredTarget, '.codex/state.md')), false);
 });
 
 test('ok starts an active step from the recommended next step', () => {

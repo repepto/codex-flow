@@ -30,6 +30,7 @@ const {
   recordDecision,
   resyncState,
   setGoal,
+  setStrictMode,
   startRecommendedStep,
   startStep,
   validateWorkflowState
@@ -262,6 +263,7 @@ function parseInternalArgs(args) {
     implementation: null,
     message: null,
     nextStep: null,
+    strict: null,
     checkCommands: [],
     requireCommitWorthy: false,
     compact: false
@@ -424,6 +426,21 @@ function parseInternalArgs(args) {
       continue;
     }
 
+    if (arg === '--strict') {
+      const value = args[i + 1];
+      if (value === undefined) {
+        throw new CliError('--strict requires a value.', 2);
+      }
+      options.strict = value;
+      i += 1;
+      continue;
+    }
+
+    if (arg.startsWith('--strict=')) {
+      options.strict = arg.slice('--strict='.length);
+      continue;
+    }
+
     if (arg === '--check-command') {
       const value = args[i + 1];
       if (value === undefined) {
@@ -530,6 +547,13 @@ function runInternalCommand({ commandArgs, options }) {
       return printInternalResult(resyncState(targetRoot));
     }
 
+    if (action === 'set-strict') {
+      if (options.strict === null) {
+        throw new CliError('internal state set-strict requires --strict true|false.', 2);
+      }
+      return printInternalResult(setStrictMode(targetRoot, options.strict));
+    }
+
     if (action === 'start-step') {
       if (options.prompt === null) {
         throw new CliError('internal state start-step requires --prompt.', 2);
@@ -623,7 +647,7 @@ function runInternalCommand({ commandArgs, options }) {
   }
 
   throw new CliError(
-    'Unknown internal command. Supported: parse-command, validate-state, planning-context, ask-context, footer, next-step-id, commit-plan, preflight apply, state resync|start-step|start-recommended-step|set-goal|record|discard-step|finalize-step|finalize-adopt-step, gate start-step|goal|apply|adopt-step|resync|stability.',
+    'Unknown internal command. Supported: parse-command, validate-state, planning-context, ask-context, footer, next-step-id, commit-plan, preflight apply, state resync|set-strict|start-step|start-recommended-step|set-goal|record|discard-step|finalize-step|finalize-adopt-step, gate start-step|goal|apply|adopt-step|resync|stability.',
     2
   );
 }

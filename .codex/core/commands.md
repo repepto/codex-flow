@@ -26,6 +26,7 @@ codex-flow internal next-step-id
 codex-flow internal commit-plan
 codex-flow internal preflight apply
 codex-flow internal state resync
+codex-flow internal state set-strict --strict <true|false>
 codex-flow internal state start-step --prompt <prompt>
 codex-flow internal state start-recommended-step
 codex-flow internal state set-goal --description <description>
@@ -187,6 +188,8 @@ Behavior:
 
 `strict:true` and `strict:false` are allowed runtime-mode switches. They are not unsafe merely because they update `.codex/state.md`, but they must preserve every other state field and must not be combined with any other requested action.
 
+`.codex/state.md` must be ignored runtime state before `strict:true` or `strict:false` writes it. If `.codex/state.md` is tracked by git or not ignored, Codex must stop instead of creating versioned or git-visible runtime state.
+
 If `.codex/state.md` is missing, create the default state skeleton with the requested `Strict Mode` value, `Last Known Revision: none`, `Last Known Branch: none`, `Last Sync Source: none`, and `Discussion Mode: none`.
 
 Creating this skeleton does not initialize sync. The sync baseline remains uninitialized until a later successful `resync`.
@@ -194,6 +197,8 @@ Creating this skeleton does not initialize sync. The sync baseline remains unini
 `strict:true` enables Strict Mode.
 
 `strict:false` disables Strict Mode and returns Codex to its default reasoning behavior.
+
+When the internal helper `codex-flow internal state set-strict --strict <true|false>` is available, Codex must prefer it to update `.codex/state.md`, preserve the existing sync/discussion fields, create an uninitialized state skeleton when needed, and verify that the state file is ignored runtime state.
 
 In Strict Mode, Codex may make factual or technical conclusions only from project code, project files, dependency code, command output, and user-provided context that are available in the current session. If the available context is insufficient to support a conclusion, Codex must stop that line of reasoning, say what context is missing, and wait for the user to provide it or allow a way to inspect it.
 

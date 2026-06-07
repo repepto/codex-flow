@@ -1,6 +1,6 @@
 {
   "name": "@repepto/codex-flow",
-  "version": "0.2.13",
+  "version": "0.2.14",
   "description": "CLI installer and doctor for the Codex Flow starter pack.",
   "license": "UNLICENSED",
   "repository": {
@@ -23,7 +23,7 @@
   "scripts": {
     "doctor": "node bin/codex-flow.js doctor",
     "pack:dry-run": "npm pack --dry-run",
-    "test": "node --test \"test/**/*.test.js\"",
+    "test": "sh -c 'node --test \"$@\" \"test/**/*.test.js\"' --",
     "check": "npm test && npm run doctor && npm run pack:dry-run"
   },
   "engines": {

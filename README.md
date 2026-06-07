@@ -92,6 +92,7 @@ codex-flow internal next-step-id
 codex-flow internal commit-plan --require-commit-worthy
 codex-flow internal preflight apply
 codex-flow internal state resync
+codex-flow internal state set-strict --strict false
 codex-flow internal state start-step --prompt 'Add compact mode'
 codex-flow internal state start-recommended-step
 codex-flow internal state set-goal --description 'Build a maintainable slot platform that can support dozens of games.'
@@ -243,7 +244,7 @@ Long responses such as `help`, `details`, and long `ask:<question>` answers may 
 - `resync` initializes or advances the sync baseline only when the git tree has no staged, unstaged, or untracked non-ignored changes and workflow state is unambiguous.
 - Before the first successful `resync`, normal step and `adopt-step` gates report the uninitialized sync baseline directly. They do not also report revision or branch mismatch warnings for the placeholder `none` values.
 - `.codex/state.md` is local runtime state and must not be committed.
-- `strict:true` and `strict:false` may create `.codex/state.md`, but only with an uninitialized sync baseline.
+- `strict:true` and `strict:false` are mechanized by `codex-flow internal state set-strict --strict <true|false>`. They may create `.codex/state.md`, but only as ignored runtime state with an uninitialized sync baseline.
 - `.codex/current-step.md` is committed only when it is inactive.
 - Project overrides may extend rules, but cannot replace whole rule files or weaken mandatory safety rules.
 - Codex refuses prompts that would damage workflow stability, explains why, and suggests a safer prompt when possible.
