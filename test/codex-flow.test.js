@@ -531,7 +531,7 @@ test('ok starts an active step from the recommended next step', () => {
   initGit(target);
   assert.equal(runCli(['init', '--target', target]).status, 0);
   commitVersionedInstall(target);
-  assert.equal(runCli(['internal', 'state', 'resync', '--target', target]).status, 0);
+  assert.equal(resyncState(target).ok, true);
 
   const missingRecommendation = startRecommendedStep(target);
   assert.equal(missingRecommendation.ok, false);
@@ -971,15 +971,15 @@ Last completed step: none
   assert.equal(run('git', ['add', '--', '.codex/history.md', '.codex/reports/1.md', '.codex/current-step.md'], { cwd: target }).status, 0);
   assert.equal(run('git', ['commit', '-m', 'chore: seed completed step'], { cwd: target }).status, 0);
   assert.equal(run('git', ['status', '--short'], { cwd: target }).stdout.trim(), '');
-  assert.equal(runCli(['internal', 'state', 'resync', '--target', target]).status, 0);
+  assert.equal(resyncState(target).ok, true);
 
-  assert.equal(runCli(['internal', 'state', 'start-step', '--prompt', 'Discard this step', '--target', target]).status, 0);
+  const started = startStep(target, 'Discard this step');
+  assert.equal(started.ok, true, started.errors.join('\n'));
   assert.match(fs.readFileSync(path.join(target, '.codex/current-step.md'), 'utf8'), /Status: active/);
   assert.match(fs.readFileSync(path.join(target, '.codex/current-step.md'), 'utf8'), /Step ID: 2/);
 
-  const result = runCli(['internal', 'state', 'discard-step', '--target', target]);
-  assert.equal(result.status, 0, result.stdout + result.stderr);
-  const discard = JSON.parse(result.stdout);
+  const discard = discardActiveStep(target);
+  assert.equal(discard.ok, true, discard.errors.join('\n'));
   assert.equal(discard.details.discardedStepId, 2);
   assert.equal(discard.details.lastCompletedStep, '1');
   assert.equal(discard.details.committed, true);
@@ -993,14 +993,14 @@ Last completed step: none
   assert.match(fs.readFileSync(path.join(target, '.codex/state.md'), 'utf8'), /Last Sync Source: discard-step:2/);
   assert.equal(run('git', ['log', '-1', '--format=%s'], { cwd: target }).stdout.trim(), 'chore: discard step 2');
 
-  const resync = runCli(['internal', 'state', 'resync', '--target', target]);
-  assert.equal(resync.status, 0, resync.stdout + resync.stderr);
+  const resync = resyncState(target);
+  assert.equal(resync.ok, true, resync.errors.join('\n'));
   assert.match(fs.readFileSync(path.join(target, '.codex/state.md'), 'utf8'), /Last Sync Source: resync/);
   assert.equal(run('git', ['status', '--short'], { cwd: target }).stdout.trim(), '');
 
-  const secondDiscard = runCli(['internal', 'state', 'discard-step', '--target', target]);
-  assert.equal(secondDiscard.status, 1);
-  assert.deepEqual(JSON.parse(secondDiscard.stdout).errors, ['No active step.']);
+  const secondDiscard = discardActiveStep(target);
+  assert.equal(secondDiscard.ok, false);
+  assert.deepEqual(secondDiscard.errors, ['No active step.']);
 });
 
 test('discard-step refuses to orphan active-step project changes', () => {
