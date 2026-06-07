@@ -1085,14 +1085,15 @@ test('internal finalize-step times out hung required checks before completed met
   assert.equal(runCli(['internal', 'state', 'start-step', '--prompt', 'Add file with hung check', '--target', target]).status, 0);
   fs.writeFileSync(path.join(target, 'payload.txt'), 'payload\n', 'utf8');
 
+  const hungCommand = hungRequiredCheckCommand();
   const result = finalizeStep(target, {
     title: 'Add file with hung check',
-    checkCommands: ['while :; do :; done'],
+    checkCommands: [hungCommand],
     checkTimeoutMs: 100
   });
 
   assert.equal(result.ok, false);
-  assert.match(result.errors.join('\n'), /Required check timed out after 100 ms: while :; do :; done/);
+  assert.match(result.errors.join('\n'), /Required check timed out after 100 ms: exec .*setTimeout/);
   assert.equal(fs.existsSync(path.join(target, '.codex/reports/1.md')), false);
   assert.match(fs.readFileSync(path.join(target, '.codex/current-step.md'), 'utf8'), /Status: active/);
   assert.doesNotMatch(fs.readFileSync(path.join(target, '.codex/history.md'), 'utf8'), /## Step 1/);
@@ -1218,14 +1219,15 @@ test('internal finalize-adopt-step times out hung required checks before complet
   assert.equal(runCli(['internal', 'state', 'resync', '--target', target]).status, 0);
   fs.writeFileSync(path.join(target, 'manual.txt'), 'manual\n', 'utf8');
 
+  const hungCommand = hungRequiredCheckCommand();
   const result = finalizeAdoptStep(target, {
     title: 'Adopt manual file with hung check',
-    checkCommands: ['while :; do :; done'],
+    checkCommands: [hungCommand],
     checkTimeoutMs: 100
   });
 
   assert.equal(result.ok, false);
-  assert.match(result.errors.join('\n'), /Required check timed out after 100 ms: while :; do :; done/);
+  assert.match(result.errors.join('\n'), /Required check timed out after 100 ms: exec .*setTimeout/);
   assert.equal(fs.existsSync(path.join(target, '.codex/reports/1.md')), false);
   assert.match(fs.readFileSync(path.join(target, '.codex/current-step.md'), 'utf8'), /No active step/);
   assert.doesNotMatch(fs.readFileSync(path.join(target, '.codex/history.md'), 'utf8'), /## Step 1/);
@@ -1351,7 +1353,8 @@ function run(command, args, options = {}) {
     cwd,
     encoding: 'utf8',
     input: options.input,
-    timeout: options.timeout || TEST_COMMAND_TIMEOUT_MS
+    timeout: options.timeout || TEST_COMMAND_TIMEOUT_MS,
+    killSignal: 'SIGKILL'
   });
 
   if (result.error) {
@@ -1368,6 +1371,14 @@ function run(command, args, options = {}) {
   }
 
   return result;
+}
+
+function hungRequiredCheckCommand() {
+  return `exec ${shellQuote(process.execPath)} -e ${shellQuote('setTimeout(() => {}, 100000)')}`;
+}
+
+function shellQuote(value) {
+  return `'${String(value).replace(/'/g, "'\\''")}'`;
 }
 
 process.once('exit', () => {
