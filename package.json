@@ -1,6 +1,6 @@
 {
   "name": "@repepto/codex-flow",
-  "version": "0.2.11",
+  "version": "0.2.12",
   "description": "CLI installer and doctor for the Codex Flow starter pack.",
   "license": "UNLICENSED",
   "repository": {

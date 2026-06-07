@@ -759,6 +759,12 @@ test('workflow state footer stays accurate across resync, stale, discard, apply,
   assert.match(footer.details.footer, /Active Step:\n\nnone/);
   assert.equal(footer.details.gitTree.status, 'clean');
   assert.equal(footer.details.commands.recommendedNextCommand, 'ok');
+  assert.equal(footer.details.recommendedStep, 'Review payload fixture usage before broadening it.');
+  assert.match(footer.details.footer, /Recommended Step:\n\nReview payload fixture usage before broadening it\./);
+  assert.match(footer.details.footer, /Recommended Next Command:\n\nok/);
+  const compactOk = buildWorkflowStateFooter(target, { compact: true });
+  assert.match(compactOk.details.footer, /Step:\n\nReview payload fixture usage before broadening it\./);
+  assert.match(compactOk.details.footer, /Next:\n\nok/);
 
   fs.writeFileSync(path.join(target, 'manual.txt'), 'manual\n', 'utf8');
   footer = buildWorkflowStateFooter(target);

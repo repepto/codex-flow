@@ -95,6 +95,10 @@ Discussion Mode: <none|active>
 Git Tree: <clean|dirty|unknown, optionally with an active-step metadata note>
 Step Base: <none|current|stale|unknown>
 
+Recommended Step:
+
+<shown only when Recommended Next Command is ok>
+
 Recommended Next Command:
 
 <command, or none>
@@ -126,6 +130,10 @@ Discussion: <none|active>
 Git Tree: <clean|dirty|unknown, optionally with an active-step metadata note>
 Step Base: <none|current|stale|unknown>
 
+Step:
+
+<shown only when Next is ok>
+
 Next:
 
 <command, or none>
@@ -149,6 +157,8 @@ Recommended next command is state-derived:
 - if no active step exists and sync state needs initialization or reconciliation while `resync` is allowed, recommend `resync`;
 - if no active step exists, the start-step gate passes, and `.codex/next-step.md` contains a substantive recommendation, recommend `ok`;
 - otherwise show `Recommended Next Command: none` and include `Available Next Commands` only when several valid next actions exist.
+
+When the recommended next command is `ok`, the footer must also show the actual recommended step text from `.codex/next-step.md`, so the operator can see what `ok` will accept.
 
 Read-only commands, including `ask:<question>`, must remain available in the footer even when state-changing workflow commands are blocked.
 

@@ -220,7 +220,7 @@ Use `help` at any point for state-aware guidance. It is read-only and explains w
 
 ## Workflow State Footer
 
-Workflow-related Codex chat responses append a read-only footer after the main answer. It shows the active step, active goal, Strict Mode, Discussion Mode, git/workflow cleanliness, active-step base status, the recommended next command, currently available commands, and currently blocked commands.
+Workflow-related Codex chat responses append a read-only footer after the main answer. It shows the active step, active goal, Strict Mode, Discussion Mode, git/workflow cleanliness, active-step base status, the recommended next command, the recommended step accepted by `ok` when applicable, currently available commands, and currently blocked commands.
 
 Long responses such as `help`, `details`, and long `ask:<question>` answers may use compact mode. Footer generation never creates steps, records, reports, commits, state updates, or file changes.
 
